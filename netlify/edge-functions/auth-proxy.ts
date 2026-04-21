@@ -1,7 +1,7 @@
 // netlify/edge-functions/auth-proxy.ts
-// Auth proxy — wraps Supabase Auth API
-// Handles: login, signup, logout, refresh, forgot_password, reset_password, update_name
-// project_members CRUD handled via supabase-js with user JWT (RLS enforced)
+/// <reference types="https://esm.sh/@types/node/index.d.ts" />
+// @ts-nocheck
+// Netlify Edge Function — runs on Deno, not Node
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_ANON        = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
@@ -17,7 +17,6 @@ export default async function handler(req: Request) {
   try {
     const body = req.method !== 'GET' ? await req.json().catch(() => ({})) : {}
 
-    // ── LOGIN ───────────────────────────────────────────────────
     if (action === 'login') {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
@@ -33,7 +32,6 @@ export default async function handler(req: Request) {
       })
     }
 
-    // ── SIGNUP ──────────────────────────────────────────────────
     if (action === 'signup') {
       if (!SUPABASE_SERVICE_KEY) return json({ error: 'Configuration manquante' }, 500)
       const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
@@ -50,7 +48,6 @@ export default async function handler(req: Request) {
         const msg = createData.message || createData.error_description || 'Erreur lors de la création'
         return json({ error: msg }, createRes.status === 422 ? 409 : 400)
       }
-      // Auto-login after signup
       const loginRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
@@ -65,7 +62,6 @@ export default async function handler(req: Request) {
       })
     }
 
-    // ── REFRESH ─────────────────────────────────────────────────
     if (action === 'refresh') {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
         method: 'POST',
@@ -81,7 +77,6 @@ export default async function handler(req: Request) {
       })
     }
 
-    // ── FORGOT PASSWORD ─────────────────────────────────────────
     if (action === 'forgot_password') {
       if (!body.email) return json({ error: 'Email requis' }, 400)
       await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
@@ -92,7 +87,6 @@ export default async function handler(req: Request) {
       return json({ success: true })
     }
 
-    // ── RESET PASSWORD ──────────────────────────────────────────
     if (action === 'reset_password') {
       if (!body.access_token || !body.new_password) return json({ error: 'Paramètres manquants' }, 400)
       if (body.new_password.length < 8) return json({ error: 'Mot de passe trop court' }, 400)
@@ -106,7 +100,6 @@ export default async function handler(req: Request) {
       return json({ success: true })
     }
 
-    // ── UPDATE DISPLAY NAME ─────────────────────────────────────
     if (action === 'update_name') {
       const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '')
       if (!token) return json({ error: 'Non authentifié' }, 401)

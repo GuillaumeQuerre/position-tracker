@@ -159,7 +159,7 @@ const OnboardingChart = memo(function OnboardingChart({
       })
     : series
 
-  function getKwColor(kwId: string, idx: number): string {
+  function getKwColor(kwId: string): string {
     if (highlightKws.includes(kwId)) {
       if (kwId === 'kw1') return GREEN
       if (kwId === 'kw3') return WHITE
@@ -205,11 +205,11 @@ const OnboardingChart = memo(function OnboardingChart({
           }}
           cursor={{ stroke: '#374151', strokeWidth: 1 }}
         />
-        {MOCK_KWS.map((kw, i) => {
+        {MOCK_KWS.map((kw) => {
           const isHl = highlightKws.includes(kw.id) || actionKws.includes(kw.id)
           return (
             <Line key={kw.id} type="monotone" dataKey={kw.id} name={kw.keyword}
-              stroke={getKwColor(kw.id, i)}
+              stroke={getKwColor(kw.id)}
               strokeWidth={isHl ? 2.5 : 0.8}
               opacity={isHl ? 1 : hasHighlight ? 0.12 : 0.5}
               connectNulls={step.highlightAction == null} isAnimationActive={false} dot={false}
@@ -224,20 +224,6 @@ const OnboardingChart = memo(function OnboardingChart({
   )
 })
 
-// ── Action marker component (reusable visual) ─────────────────────────────
-function ActionMarker({ name, color, small }: { name: string; color: string; small?: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="relative flex flex-col items-center">
-        <div className="rounded-full" style={{ width: small ? 3 : 4, height: small ? 20 : 28, backgroundColor: color, opacity: 0.6 }} />
-      </div>
-      <span className={`rounded font-bold text-white whitespace-nowrap ${small ? 'text-[7px] px-1 py-0' : 'text-[8px] px-1.5 py-0.5'}`}
-        style={{ backgroundColor: color }}>
-        {name}
-      </span>
-    </div>
-  )
-}
 
 // ── Sidebar mock for step 2 ────────────────────────────────────────────────
 function MockSidebar() {
