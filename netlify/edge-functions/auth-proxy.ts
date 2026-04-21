@@ -1,7 +1,5 @@
 // netlify/edge-functions/auth-proxy.ts
-/// <reference types="https://esm.sh/@types/node/index.d.ts" />
 // @ts-nocheck
-// Netlify Edge Function — runs on Deno, not Node
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_ANON        = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
@@ -33,28 +31,44 @@ export default async function handler(req: Request) {
     }
 
     if (action === 'signup') {
-  if (!SUPABASE_SERVICE_KEY) return json({ error: 'Configuration manquante' }, 500)
-  const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-    },
-    body: JSON.stringify({ email: body.email, password: body.password, email_confirm: true }),
-  })
-  const createData = await createRes.json()
-  if (!createRes.ok) {
-    // Message détaillé temporaire
-    return json({ error: createData.message || createData.error_description || createData.msg || JSON.stringify(createData) }, createRes.status)
-  }
+      if (!SUPABASE_SERVICE_KEY) return json({ error: 'SUPABASE_SERVICE_ROLE_KEY manquant' }, 500)
+
+      const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        },
+        body: JSON.stringify({ email: body.email, password: body.password, email_confirm: true }),
+      })
+      const createData = await createRes.json()
+
+      // Debug temporaire — retourne tout ce que Supabase renvoie
+      if (!createRes.ok) {
+        return json({
+          error: createData.message || createData.error_description || createData.msg || 'Erreur création',
+          debug_status: createRes.status,
+          debug_body: createData,
+        }, createRes.status)
+      }
+
+      // Auto-login après création
       const loginRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
         body: JSON.stringify({ email: body.email, password: body.password }),
       })
       const loginData = await loginRes.json()
-      if (!loginRes.ok) return json({ error: 'Compte créé. Connectez-vous manuellement.' }, 200)
+
+      if (!loginRes.ok) {
+        return json({
+          error: 'Compte créé mais connexion automatique échouée',
+          debug_login_status: loginRes.status,
+          debug_login_body: loginData,
+        }, 200)
+      }
+
       return json({
         access_token: loginData.access_token,
         refresh_token: loginData.refresh_token,
@@ -114,8 +128,8 @@ export default async function handler(req: Request) {
     }
 
     return json({ error: 'Action inconnue' }, 400)
-  } catch (e: any) {
-    return json({ error: e.message }, 500)
+  } catch (e) {
+    return json({ error: e.message, stack: e.stack }, 500)
   }
 }
 
@@ -127,7 +141,7 @@ function cors() {
   }
 }
 
-function json(data: unknown, status = 200) {
+function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'Content-Type': 'application/json', ...cors() },
