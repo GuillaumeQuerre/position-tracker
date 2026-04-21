@@ -33,21 +33,21 @@ export default async function handler(req: Request) {
     }
 
     if (action === 'signup') {
-      if (!SUPABASE_SERVICE_KEY) return json({ error: 'Configuration manquante' }, 500)
-      const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        },
-        body: JSON.stringify({ email: body.email, password: body.password, email_confirm: true }),
-      })
-      const createData = await createRes.json()
-      if (!createRes.ok) {
-        const msg = createData.message || createData.error_description || 'Erreur lors de la création'
-        return json({ error: msg }, createRes.status === 422 ? 409 : 400)
-      }
+  if (!SUPABASE_SERVICE_KEY) return json({ error: 'Configuration manquante' }, 500)
+  const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    },
+    body: JSON.stringify({ email: body.email, password: body.password, email_confirm: true }),
+  })
+  const createData = await createRes.json()
+  if (!createRes.ok) {
+    // Message détaillé temporaire
+    return json({ error: createData.message || createData.error_description || createData.msg || JSON.stringify(createData) }, createRes.status)
+  }
       const loginRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
