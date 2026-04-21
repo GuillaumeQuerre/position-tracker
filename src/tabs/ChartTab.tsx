@@ -490,53 +490,121 @@ const ActionFlagsOverlay = memo(function ActionFlagsOverlay({
 })
 
 // ── Volume chart: search volume (area) + estimated traffic (area) ──────────
+// Score color — 10% steps from red to green
+function scoreToColor(s: number | null): string {
+  if (s == null) return '#4a7a7a'
+  if (s >= 100) return '#22c55e'
+  if (s >= 90)  return '#4ade80'
+  if (s >= 80)  return '#86efac'
+  if (s >= 70)  return '#a3f1eb'
+  if (s >= 60)  return '#317979'
+  if (s >= 50)  return '#f59e0b'
+  if (s >= 40)  return '#fb923c'
+  if (s >= 30)  return '#f87171'
+  if (s >= 20)  return '#ef4444'
+  return '#dc2626'
+}
+
 function VolumeTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
   let dateStr = label
   try { dateStr = format(parseISO(label), 'd MMM yyyy', { locale: fr }) } catch {}
+
+  const traffic    = payload.find((p: any) => p.dataKey === 'traffic')?.value ?? 0
+  const potential  = payload.find((p: any) => p.dataKey === 'potential30')?.value ?? 0
+  const score      = potential > 0 ? Math.round((traffic / potential) * 100) : null
+  const scoreColor = scoreToColor(score)
+
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-2 shadow-xl pointer-events-none">
-      <p className="text-[9px] text-gray-500 mb-1">{dateStr}</p>
-      {payload.map((p: any) => (
-        <div key={p.dataKey} className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: p.color }} />
-          <span className="text-[10px] text-gray-300">{p.name}</span>
-          <span className="text-[10px] font-mono font-semibold text-white ml-auto">{p.value?.toLocaleString('fr-FR')}</span>
+    <div style={{ background: '#0d1f1f', border: '1px solid #1a3535', borderRadius: 10, padding: '10px 14px', minWidth: 180, pointerEvents: 'none' }}>
+      <p style={{ fontSize: 9, color: '#4a7a7a', marginBottom: 8 }}>{dateStr}</p>
+
+      {/* Score badge */}
+      {score != null && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #1a3535' }}>
+          <span style={{ fontSize: 10, color: '#4a7a7a' }}>Captation objectif</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: scoreColor, fontFamily: 'monospace' }}>{score}%</span>
         </div>
-      ))}
+      )}
+
+      {/* Lines */}
+      {[
+        { key: 'traffic',      name: 'Trafic estimé',   color: '#a3f1eb' },
+        { key: 'potential30',  name: 'Objectif 30%',    color: '#f59e0b' },
+        { key: 'searchVolume', name: 'Vol. potentiel',  color: '#317979' },
+      ].map(({ key, name, color }) => {
+        const entry = payload.find((p: any) => p.dataKey === key)
+        if (!entry) return null
+        return (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: '#a3c4c4', flex: 1 }}>{name}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color, fontFamily: 'monospace' }}>{entry.value?.toLocaleString('fr-FR')}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
 const VolumeChart = memo(function VolumeChart({ data }: { data: { date: string; searchVolume: number; traffic: number; potential30?: number }[] }) {
   if (!data.length) return <div className="flex items-center justify-center h-full text-gray-600">Aucune donnée de volume</div>
+
+  // Compute latest score for header badge
+  const last = data[data.length - 1]
+  const latestScore = last && last.potential30 && last.potential30 > 0
+    ? Math.round((last.traffic / last.potential30) * 100) : null
+  const scoreColor = scoreToColor(latestScore)
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 20, right: 10, bottom: 10, left: 10 }}>
-        <defs>
-          <linearGradient id="gradVolume" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#317979" stopOpacity={0.25} />
-            <stop offset="100%" stopColor="#317979" stopOpacity={0.02} />
-          </linearGradient>
-          <linearGradient id="gradTraffic" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#a3f1eb" stopOpacity={0.3} />
-            <stop offset="100%" stopColor="#a3f1eb" stopOpacity={0.02} />
-          </linearGradient>
-          <linearGradient id="gradPotential30" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.2} />
-            <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
-          tickFormatter={d => { try { return format(parseISO(d), 'd MMM', { locale: fr }) } catch { return d } }} />
-        <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} width={50}
-          tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`} />
-        <Tooltip content={<VolumeTooltip />} cursor={{ stroke: '#374151', strokeWidth: 1 }} />
-        <Area type="monotone" dataKey="searchVolume" name="Vol. potentiel" stroke="#317979" strokeWidth={2} fill="url(#gradVolume)" isAnimationActive={false} />
-        <Area type="monotone" dataKey="potential30" name="Objectif 30%" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="5 3" fill="url(#gradPotential30)" isAnimationActive={false} />
-        <Area type="monotone" dataKey="traffic" name="Trafic estimé" stroke="#a3f1eb" strokeWidth={2} fill="url(#gradTraffic)" isAnimationActive={false} />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Score badge — top right */}
+      {latestScore != null && (
+        <div style={{ position: 'absolute', top: 4, right: 14, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, background: '#0d1f1f', border: `1px solid ${scoreColor}40`, borderRadius: 8, padding: '4px 10px' }}>
+          <span style={{ fontSize: 9, color: '#4a7a7a' }}>Captation</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: scoreColor, fontFamily: 'monospace' }}>{latestScore}%</span>
+          <span style={{ fontSize: 9, color: '#4a7a7a' }}>de l'objectif</span>
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 20, right: 10, bottom: 10, left: 10 }}>
+          <defs>
+            {/* Volume potentiel — très discret, arrière-plan */}
+            <linearGradient id="gradVolume" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor="#317979" stopOpacity={0.10} />
+              <stop offset="100%" stopColor="#317979" stopOpacity={0.01} />
+            </linearGradient>
+            {/* Objectif 30% — amber, visible */}
+            <linearGradient id="gradPotential30" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.18} />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.01} />
+            </linearGradient>
+            {/* Trafic estimé — teal vif, dominant */}
+            <linearGradient id="gradTraffic" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor="#a3f1eb" stopOpacity={0.45} />
+              <stop offset="100%" stopColor="#a3f1eb" stopOpacity={0.03} />
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
+            tickFormatter={d => { try { return format(parseISO(d), 'd MMM', { locale: fr }) } catch { return d } }} />
+          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} width={50}
+            tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`} />
+          <Tooltip content={<VolumeTooltip />} cursor={{ stroke: '#1a3535', strokeWidth: 1 }} />
+          {/* Volume potentiel — fond discret, tracé fin */}
+          <Area type="monotone" dataKey="searchVolume" name="Vol. potentiel"
+            stroke="#317979" strokeWidth={1} strokeDasharray="3 5" fill="url(#gradVolume)"
+            isAnimationActive={false} />
+          {/* Objectif 30% — cible amber, pointillés épais */}
+          <Area type="monotone" dataKey="potential30" name="Objectif 30%"
+            stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" fill="url(#gradPotential30)"
+            isAnimationActive={false} />
+          {/* Trafic estimé — réalité, courbe dominante */}
+          <Area type="monotone" dataKey="traffic" name="Trafic estimé"
+            stroke="#a3f1eb" strokeWidth={2.5} fill="url(#gradTraffic)"
+            isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   )
 })
 
@@ -1219,7 +1287,11 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                 <span className="text-[8px]" style={{color:'#4a7a7a'}}>{x.l}</span>
               </div>
             ))}
-            {displayMode === 'volume' && [{ c: C_PRIMARY, l: 'Potentiel' }, { c: '#f59e0b', l: 'Obj. 30%', dash: true }, { c: C_LIGHT, l: 'Trafic' }].map(x => (
+            {displayMode === 'volume' && [
+              { c: C_LIGHT, l: 'Trafic estimé', solid: true },
+              { c: '#f59e0b', l: 'Objectif 30%', dash: true },
+              { c: C_PRIMARY, l: 'Vol. potentiel', faint: true },
+            ].map(x => (
               <div key={x.l} className="flex items-center gap-0.5">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: x.c }} />
                 <span className="text-[8px]" style={{color:'#4a7a7a'}}>{x.l}</span>
