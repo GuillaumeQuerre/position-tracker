@@ -5,6 +5,11 @@
 [build.environment]
   NODE_VERSION = "20"
 
+
+[[edge_functions]]
+  path     = "/api/auth"
+  function = "auth-proxy"
+  
 # SPA redirect — toutes les routes vers index.html
 [[redirects]]
   from = "/*"
@@ -19,7 +24,3 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-
-[[edge_functions]]
-  path     = "/api/auth"
-  function = "auth-proxy"
