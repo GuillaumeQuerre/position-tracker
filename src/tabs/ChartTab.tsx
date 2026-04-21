@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, memo, useRef } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, AreaChart, Area,
-  ResponsiveContainer, ReferenceLine, Brush
+  ResponsiveContainer, ReferenceLine
 } from 'recharts'
 import { usePositionsData } from '../hooks/usePositionsData'
 import { useAppStore } from '../store/useAppStore'
@@ -150,17 +150,16 @@ const CHART_Y_TICKS = [1, 10, 20, 30, 40, 50]
 // ── BgChart: purely static layer — only re-renders when series/keywords change ──
 // Never re-renders on hover. Separated from highlight layer for this reason.
 const BgChart = memo(function BgChart({
-  series, bgKeywords, importDates, onBrushChange,
+  series, bgKeywords, importDates,
 }: {
   series: any[]
   bgKeywords: { id: string; keyword: string }[]
   importDates: Set<string>
-  onBrushChange?: (from: string, to: string) => void
 }) {
   _importDatesRef.current = importDates
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={series} margin={{ top: 30, right: 10, bottom: 25, left: 10 }}>
+      <LineChart data={series} margin={{ top: 30, right: 10, bottom: 10, left: 10 }}>
         <XAxis dataKey="date" tick={<ChartCustomTick />} tickLine={false}
           axisLine={{ stroke: '#1f2937' }} interval="preserveStartEnd" />
         <YAxis reversed domain={[1, 50]} ticks={CHART_Y_TICKS}
@@ -177,19 +176,6 @@ const BgChart = memo(function BgChart({
             name={kw.keyword} stroke="#4b5563" strokeWidth={0.6} opacity={0.3}
             connectNulls isAnimationActive={false} dot={false} activeDot={false} />
         ))}
-        {onBrushChange && (
-          <Brush
-            dataKey="date" height={18} stroke="#317979" fill="#071212"
-            travellerWidth={6}
-            tickFormatter={d => { try { return format(parseISO(d), 'd MMM', { locale: fr }) } catch { return d } }}
-            onChange={(range: any) => {
-              if (range?.startIndex == null || range?.endIndex == null) return
-              const from = series[range.startIndex]?.date
-              const to = series[range.endIndex]?.date
-              if (from && to && from !== to) onBrushChange(from, to)
-            }}
-          />
-        )}
       </LineChart>
     </ResponsiveContainer>
   )
@@ -199,7 +185,7 @@ const BgChart = memo(function BgChart({
 // Transparent axes + no axis chrome — purely the colored lines on top of BgChart.
 // Re-renders on hover but only renders 1-N lines, never the 500 bg lines.
 // Tooltip is updated via direct DOM ref — zero React re-renders on mousemove.
-const HL_MARGIN = { top: 30, right: 10, bottom: 25, left: 10 }
+const HL_MARGIN = { top: 30, right: 10, bottom: 10, left: 10 }
 const HighlightChart = memo(function HighlightChart({
   series, highlightedKeywords, actionKeywords, actionSeries,
 }: {
@@ -271,44 +257,38 @@ const HighlightChart = memo(function HighlightChart({
 
   if (highlightedKeywords.length === 0 && actionKeywords.length === 0) return null
 
-  // Outer div: relative, captures mouse events, does NOT clip (tooltip must overflow)
-  // Inner div: clips the SVG to prevent highlight lines from bleeding outside Y-axis domain bounds
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}
       onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
-      {/* Chart clipping layer — overflow:hidden prevents lines from rendering outside [1,50] domain */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={mergedSeries} margin={HL_MARGIN}>
-            {/* Transparent axes — pixel-perfect alignment with BgChart */}
-            <XAxis dataKey="date" tick={false} tickLine={false} axisLine={false} />
-            <YAxis reversed domain={[1, 50]} ticks={CHART_Y_TICKS}
-              tick={false} tickLine={false} axisLine={false} width={30}
-              allowDataOverflow={false} />
-            {highlightedKeywords.map(kw => (
-              <Line key={`hl-${kw.id}`} type="monotone" dataKey={kw.id}
-                name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
-                connectNulls isAnimationActive={false}
-                dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} />}
-                activeDot={false} />
-            ))}
-            {actionKeywords.map(kw => (
-              <Line key={`act-${kw.id}`} type="monotone" dataKey={`__action__${kw.id}`}
-                name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
-                connectNulls isAnimationActive={false}
-                dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} dataKey={`__action__${kw.id}`} />}
-                activeDot={false} />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      {/* Tooltip DOM node — outside clip layer so it can overflow freely */}
+      {/* Tooltip DOM node — updated directly, never via React state */}
       <div ref={tooltipRef} style={{
         display: 'none', position: 'absolute', zIndex: 50, pointerEvents: 'none',
         background: '#0d1f1f', border: '1px solid #1a3535', borderRadius: 8,
         padding: '7px 10px', minWidth: 140, maxWidth: 200,
         boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
       }} />
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={mergedSeries} margin={HL_MARGIN}>
+          {/* Transparent axes — pixel-perfect alignment with BgChart */}
+          <XAxis dataKey="date" tick={false} tickLine={false} axisLine={false} />
+          <YAxis reversed domain={[1, 50]} ticks={CHART_Y_TICKS}
+            tick={false} tickLine={false} axisLine={false} width={30} />
+          {highlightedKeywords.map(kw => (
+            <Line key={`hl-${kw.id}`} type="monotone" dataKey={kw.id}
+              name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
+              connectNulls isAnimationActive={false}
+              dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} />}
+              activeDot={false} />
+          ))}
+          {actionKeywords.map(kw => (
+            <Line key={`act-${kw.id}`} type="monotone" dataKey={`__action__${kw.id}`}
+              name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
+              connectNulls isAnimationActive={false}
+              dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} dataKey={`__action__${kw.id}`} />}
+              activeDot={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   )
 })
@@ -1058,11 +1038,6 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   hoverCtx.current.multiSelect = multiSelect
   hoverCtx.current.viewMode = viewMode
 
-  // Stable callback for Brush zoom — must be defined before return (Rules of Hooks)
-  const handleBrushChange = useCallback((from: string, to: string) => {
-    setDateRange({ from, to })
-  }, [setDateRange])
-
   const handleHover = useCallback((id: string) => {
     const { lockedItem, multiSelect, viewMode } = hoverCtx.current
     if (!lockedItem && !multiSelect.size) setHovered({ type: viewMode, id })
@@ -1270,8 +1245,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
             <div className="relative w-full h-full">
               {/* BgChart: stable, never re-renders on hover */}
               <div className="absolute inset-0">
-                <BgChart series={series} bgKeywords={bgKeywords} importDates={importDates}
-                  onBrushChange={handleBrushChange} />
+                <BgChart series={series} bgKeywords={bgKeywords} importDates={importDates} />
               </div>
               {/* HighlightChart: hover overlay — only 1-N lines, re-renders on hover */}
               <div className="absolute inset-0 pointer-events-none">
