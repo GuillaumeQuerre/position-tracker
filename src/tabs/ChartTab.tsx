@@ -669,6 +669,10 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const { dateRange, setDateRange } = useAppStore()
   // hovered est local — pas dans Zustand pour éviter le re-render global à chaque survol
   const [hovered, setHovered] = useState<{ type: string; id: string } | null>(null)
+
+  // Pending date range — local edit buffer, applied only on confirm
+  const [pendingRange, setPendingRange] = useState(dateRange)
+  const pendingChanged = pendingRange.from !== dateRange.from || pendingRange.to !== dateRange.to
   const _useActions = useActions() as any
   const allActions: Action[] = _useActions.actions ?? []
   const actionCategories: { id: string; name: string; color: string }[] = _useActions.categories ?? []
@@ -1233,13 +1237,29 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
         {/* Toolbar */}
         <div className="flex items-center gap-2 mb-1.5">
           <span className="text-sm" style={{filter: 'brightness(0) invert(1)'}}>📅</span>
-          <input type="date" value={dateRange.from} onChange={e => setDateRange({ ...dateRange, from: e.target.value })}
+          <input type="date" value={pendingRange.from} onChange={e => setPendingRange(p => ({ ...p, from: e.target.value }))}
             className="rounded-md px-2 py-1 text-xs font-mono focus:outline-none"
-            style={{ background: '#0d1f1f', border: '1px solid #317979', color: C_WHITE }} />
+            style={{ background: '#0d1f1f', border: `1px solid ${pendingChanged ? '#f59e0b' : '#317979'}`, color: C_WHITE }} />
           <span className="text-[10px]" style={{color: C_PRIMARY}}>→</span>
-          <input type="date" value={dateRange.to} onChange={e => setDateRange({ ...dateRange, to: e.target.value })}
+          <input type="date" value={pendingRange.to} onChange={e => setPendingRange(p => ({ ...p, to: e.target.value }))}
             className="rounded-md px-2 py-1 text-xs font-mono focus:outline-none"
-            style={{ background: '#0d1f1f', border: '1px solid #317979', color: C_WHITE }} />
+            style={{ background: '#0d1f1f', border: `1px solid ${pendingChanged ? '#f59e0b' : '#317979'}`, color: C_WHITE }} />
+          {pendingChanged && (
+            <>
+              <button
+                onClick={() => setDateRange(pendingRange)}
+                className="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors"
+                style={{ background: '#317979', color: '#071212' }}>
+                Appliquer
+              </button>
+              <button
+                onClick={() => setPendingRange(dateRange)}
+                className="px-2 py-1 rounded-md text-xs transition-colors"
+                style={{ color: '#4a7a7a' }}>
+                ✕
+              </button>
+            </>
+          )}
 
           {hasVolumes && (
             <div className="flex rounded p-0.5 ml-1" style={{background:'#0d1f1f'}}>
