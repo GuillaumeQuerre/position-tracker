@@ -150,11 +150,12 @@ const CHART_Y_TICKS = [1, 10, 20, 30, 40, 50]
 // ── BgChart: purely static layer — only re-renders when series/keywords change ──
 // Never re-renders on hover. Separated from highlight layer for this reason.
 const BgChart = memo(function BgChart({
-  series, bgKeywords, importDates,
+  series, bgKeywords, importDates, hasSelection,
 }: {
   series: any[]
   bgKeywords: { id: string; keyword: string }[]
   importDates: Set<string>
+  hasSelection?: boolean
 }) {
   _importDatesRef.current = importDates
   return (
@@ -173,7 +174,8 @@ const BgChart = memo(function BgChart({
           label={{ value: 'Top 30', position: 'insideTopRight', fill: '#2a6060', fontSize: 9 }} />
         {bgKeywords.map(kw => (
           <Line key={kw.id} type="monotone" dataKey={kw.id}
-            name={kw.keyword} stroke="#4b5563" strokeWidth={0.6} opacity={0.3}
+            name={kw.keyword} stroke="#4b5563" strokeWidth={0.6}
+            opacity={hasSelection ? 0 : 0.3}
             connectNulls isAnimationActive={false} dot={false} activeDot={false} />
         ))}
       </LineChart>
@@ -1004,10 +1006,12 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
         if (row[kw.id] != null) hasData.add(kw.id)
       }
     }
+    // Exclure les keywords déjà dans HighlightChart
+    const highlightedSet = nonActionHighlightedIds ?? new Set<string>()
     return keywords
-      .filter(k => hasData.has(k.id))
+      .filter(k => hasData.has(k.id) && !highlightedSet.has(k.id))
       .map(k => ({ id: k.id, keyword: k.keyword }))
-  }, [keywords, series])
+  }, [keywords, series, nonActionHighlightedIds])
   const allKwIds = useMemo(() => keywords.map(k => k.id), [keywords])
 
   // Legend — only changes when viewMode/data changes
@@ -1337,7 +1341,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
             <div className="relative w-full h-full">
               {/* BgChart: stable, never re-renders on hover */}
               <div className="absolute inset-0">
-                <BgChart series={series} bgKeywords={bgKeywords} importDates={importDates} />
+                <BgChart series={series} bgKeywords={bgKeywords} importDates={importDates} hasSelection={!!(nonActionHighlightedIds && nonActionHighlightedIds.size > 0)} />
               </div>
               {/* HighlightChart: hover overlay — only 1-N lines, re-renders on hover */}
               <div className="absolute inset-0 pointer-events-none">
