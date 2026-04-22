@@ -12,9 +12,27 @@ export function useActions() {
   const [unrankedUrls, setUnrankedUrls] = useState<UnrankedUrl[]>([])
   const [loading, setLoading]           = useState(true)
 
+  // Charger catégories et owners une seule fois au mount — pas de project_id sur ces tables
+  useEffect(() => {
+    supabase.from('action_categories').select('id, name, color').order('name')
+      .then(({ data }) => { if (data) setCategories(data) })
+    supabase.from('owners').select('id, name, color').order('name')
+      .then(({ data, error }) => { if (!error && data) setOwners(data) })
+    supabase.from('unranked_urls').select('id, url, visible').order('url')
+      .then(({ data, error }) => { if (!error && data) setUnrankedUrls(data) })
+  }, [])
+
   // silent=true → background sync sans setLoading(true) — préserve l'état optimiste
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
+
+    // Recharger aussi catégories/owners en background
+    supabase.from('action_categories').select('id, name, color').order('name')
+      .then(({ data }) => { if (data) setCategories(data) })
+    supabase.from('owners').select('id, name, color').order('name')
+      .then(({ data, error }) => { if (!error && data) setOwners(data) })
+    supabase.from('unranked_urls').select('id, url, visible').order('url')
+      .then(({ data, error }) => { if (!error && data) setUnrankedUrls(data) })
 
     // Filtre par project_id si disponible, sinon récupère tout (fallback sans RLS)
     const actionsQuery = supabase
@@ -32,17 +50,12 @@ export function useActions() {
 
     if (projectId) roadmapQuery.eq('project_id', projectId)
 
-    const [catsRes, ownersRes, actsRes, linksRes, unrankedRes] = await Promise.all([
-      supabase.from('action_categories').select('id, name, color').order('name'),
-      supabase.from('owners').select('id, name, color').order('name'),
+    const [actsRes, linksRes] = await Promise.all([
       actionsQuery,
       supabase.from('action_urls').select('action_id, url_id, unranked_url_id'),
-      supabase.from('unranked_urls').select('id, url, visible').order('url'),
     ])
 
-    setCategories(catsRes.data ?? [])
-    setOwners(ownersRes.error ? [] : (ownersRes.data ?? []))
-    setUnrankedUrls(unrankedRes.error ? [] : unrankedRes.data ?? [])
+    // categories/owners/unranked sont rechargés en parallèle ci-dessus
 
     let actsData: any[] = actsRes.data ?? []
     if (actsRes.error) {
