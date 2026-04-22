@@ -17,7 +17,7 @@ interface Session {
   user: AuthUser
 }
 
-const SESSION_KEY = 'pt_session'
+const SESSION_KEY = 'tracker_session'
 
 function loadSession(): Session | null {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') } catch { return null }
