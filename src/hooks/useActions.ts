@@ -5,43 +5,65 @@ import type { Action, ActionCategory, Owner, UnrankedUrl, RoadmapAction } from '
 
 export function useActions() {
   const { projectId } = useAppStore()
-  const [actions, setActions]         = useState<Action[]>([])
-  const [roadmap, setRoadmap]         = useState<RoadmapAction[]>([])
-  const [categories, setCategories]   = useState<ActionCategory[]>([])
-  const [owners, setOwners]           = useState<Owner[]>([])
+  const [actions, setActions]           = useState<Action[]>([])
+  const [roadmap, setRoadmap]           = useState<RoadmapAction[]>([])
+  const [categories, setCategories]     = useState<ActionCategory[]>([])
+  const [owners, setOwners]             = useState<Owner[]>([])
   const [unrankedUrls, setUnrankedUrls] = useState<UnrankedUrl[]>([])
-  const [loading, setLoading]         = useState(true)
+  const [loading, setLoading]           = useState(true)
 
-  // silent=true → background sync, no setLoading(true) (preserves optimistic state)
+  // silent=true → background sync sans setLoading(true) — préserve l'état optimiste
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
+
+    // Filtre par project_id si disponible, sinon récupère tout (fallback sans RLS)
+    const actionsQuery = supabase
+      .from('actions')
+      .select('id, name, date, is_global, category_id, owner_id, notes, time_spent, created_at, action_categories(id, name, color), owners(id, name, color)')
+      .order('date', { ascending: false })
+
+    if (projectId) actionsQuery.eq('project_id', projectId)
+
+    const roadmapQuery = supabase
+      .from('roadmap_actions')
+      .select('id, name, planned_date, category_id, owner_id, is_global, notes, priority, status, estimated_time, created_at, action_categories(id, name, color), owners(id, name, color)')
+      .neq('status', 'done')
+      .order('priority')
+
+    if (projectId) roadmapQuery.eq('project_id', projectId)
+
     const [catsRes, ownersRes, actsRes, linksRes, unrankedRes] = await Promise.all([
       supabase.from('action_categories').select('id, name, color').order('name'),
       supabase.from('owners').select('id, name, color').order('name'),
-      supabase.from('actions')
-        .select('id, name, date, is_global, category_id, owner_id, notes, time_spent, created_at, action_categories(id, name, color), owners(id, name, color)')
-        .order('date', { ascending: false }),
+      actionsQuery,
       supabase.from('action_urls').select('action_id, url_id, unranked_url_id'),
       supabase.from('unranked_urls').select('id, url, visible').order('url'),
     ])
+
     setCategories(catsRes.data ?? [])
     setOwners(ownersRes.error ? [] : (ownersRes.data ?? []))
     setUnrankedUrls(unrankedRes.error ? [] : unrankedRes.data ?? [])
 
     let actsData: any[] = actsRes.data ?? []
     if (actsRes.error) {
-      const { data } = await supabase.from('actions')
+      // Fallback sans time_spent
+      const q2 = supabase.from('actions')
         .select('id, name, date, is_global, category_id, owner_id, notes, created_at, action_categories(id, name, color), owners(id, name, color)')
         .order('date', { ascending: false })
+      if (projectId) q2.eq('project_id', projectId)
+      const { data } = await q2
       if (data) {
         actsData = data.map(a => ({ ...a, time_spent: null }))
       } else {
-        const { data: d2 } = await supabase.from('actions')
+        const q3 = supabase.from('actions')
           .select('id, name, date, is_global, category_id, notes, created_at, action_categories(id, name, color)')
           .order('date', { ascending: false })
+        if (projectId) q3.eq('project_id', projectId)
+        const { data: d2 } = await q3
         actsData = (d2 ?? []).map(a => ({ ...a, time_spent: null, owner_id: null, owners: null }))
       }
     }
+
     let linksData = linksRes.data ?? []
     if (linksRes.error) {
       const { data } = await supabase.from('action_urls').select('action_id, url_id')
@@ -61,9 +83,7 @@ export function useActions() {
       created_at: a.created_at,
     }) as Action))
 
-    const rmRes = await supabase.from('roadmap_actions')
-      .select('id, name, planned_date, category_id, owner_id, is_global, notes, priority, status, estimated_time, created_at, action_categories(id, name, color), owners(id, name, color)')
-      .neq('status', 'done').order('priority')
+    const rmRes = await roadmapQuery
     if (!rmRes.error && rmRes.data) {
       const { data: rmLinks } = await supabase.from('roadmap_action_urls').select('roadmap_action_id, url_id, unranked_url_id')
       const rmUrlMap: Record<string, string[]> = {}, rmUnrankedMap: Record<string, string[]> = {}
@@ -81,15 +101,17 @@ export function useActions() {
         created_at: r.created_at,
       }) as RoadmapAction))
     } else { setRoadmap([]) }
-    setLoading(false)
-  }, [])
 
+    setLoading(false)
+  }, [projectId])
+
+  // Refetch quand projectId change
   useEffect(() => { fetchAll() }, [fetchAll])
 
   const createOwner = useCallback(async (name: string, color: string) => {
     const { data, error } = await supabase.from('owners').insert({ name, color }).select('id').single()
     if (error || !data) return null
-    await fetchAll(true); return data.id
+    fetchAll(true); return data.id
   }, [fetchAll])
 
   const updateOwner = useCallback(async (id: string, name: string, color: string) => {
@@ -117,7 +139,6 @@ export function useActions() {
     }
     setActions(prev => [optimistic, ...prev])
 
-    // Include project_id so RLS and chart filtering work
     const base: any = {
       name: input.name, date: input.date, is_global: input.is_global,
       category_id: input.category_id || null, notes: input.notes || null,
@@ -139,7 +160,6 @@ export function useActions() {
     if (!input.is_global && input.unranked_url_ids?.length)
       await supabase.from('action_urls').insert(input.unranked_url_ids.map(uid => ({ action_id: data.id, url_id: null, unranked_url_id: uid })))
 
-    // Replace temp with real id — silent sync in background
     setActions(prev => prev.map(a => a.id === tempId ? { ...a, id: data.id } : a))
     fetchAll(true)
     return data.id
