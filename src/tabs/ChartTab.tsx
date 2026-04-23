@@ -685,7 +685,8 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const [chartMode, setChartMode]         = useState<ChartMode>('keywords')
   const [displayMode, setDisplayMode]     = useState<'position' | 'volume'>('position')
   const [sortMode, setSortMode]           = useState<SortMode>('alpha')
-  const [gainLossAsc, setGainLossAsc]     = useState(false)  // false=gains first, true=losses first
+  const [gainLossAsc, setGainLossAsc]     = useState(false)
+  const [sortAsc, setSortAsc]             = useState(true)   // direction générale pour alpha/volume/pos
   const [detailSortMode, setDetailSortMode] = useState<'alpha' | 'gainloss' | 'volume'>('alpha')
   const [detailSortAsc, setDetailSortAsc] = useState(false)
   const [lockedItem, setLockedItem]       = useState<string | null>(null)
@@ -1028,30 +1029,31 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
     const sorted = [...items]
     const tot = (m: Meta) => { const s = m.stats; return s ? s.gain + s.neutral + s.loss + s.noData + s.stale100 : 0 }
     const isStale = (m: Meta) => viewMode === 'keyword' && trendData[m.id]?.trend === 'stale100'
+    const dir = sortAsc ? 1 : -1
     if (viewMode === 'keyword') {
       sorted.sort((a, b) => {
         const aS = isStale(a) ? 1 : 0, bS = isStale(b) ? 1 : 0
         if (aS !== bS) return aS - bS
-        if (sortMode === 'alpha') return a.label.localeCompare(b.label, 'fr')
+        if (sortMode === 'alpha') return dir * a.label.localeCompare(b.label, 'fr')
         if (sortMode === 'gainloss') return gainLossAsc ? (a.delta ?? 0) - (b.delta ?? 0) : (b.delta ?? 0) - (a.delta ?? 0)
-        if (sortMode === 'volume') return (volumeMap[b.id] ?? 0) - (volumeMap[a.id] ?? 0)
+        if (sortMode === 'volume') return dir * ((volumeMap[a.id] ?? 0) - (volumeMap[b.id] ?? 0))
         if (sortMode === 'pos_start') {
           const af = trendData[a.id]?.first ?? 999, bf = trendData[b.id]?.first ?? 999
-          return af - bf  // meilleure position (petit chiffre) en premier
+          return dir * (af - bf)
         }
         if (sortMode === 'pos_end') {
           const al = trendData[a.id]?.last ?? 999, bl = trendData[b.id]?.last ?? 999
-          return al - bl
+          return dir * (al - bl)
         }
         return 0
       })
     } else {
-      if (sortMode === 'alpha') sorted.sort((a, b) => a.label.localeCompare(b.label, 'fr'))
-      else if (sortMode === 'count') sorted.sort((a, b) => tot(b) - tot(a))
+      if (sortMode === 'alpha') sorted.sort((a, b) => dir * a.label.localeCompare(b.label, 'fr'))
+      else if (sortMode === 'count') sorted.sort((a, b) => dir * (tot(a) - tot(b)))
       else if (sortMode === 'gainloss') sorted.sort((a, b) => gainLossAsc ? (b.stats?.loss ?? 0) - (a.stats?.loss ?? 0) : (b.stats?.gain ?? 0) - (a.stats?.gain ?? 0))
     }
     return sorted
-  }, [legendItems, searchQuery, sortMode, gainLossAsc, viewMode, trendData, volumeMap])
+  }, [legendItems, searchQuery, sortMode, gainLossAsc, sortAsc, viewMode, trendData, volumeMap])
 
   // Detail panel data for locked item OR selected action
   const lockedDetail = useMemo(() => {
@@ -1204,14 +1206,18 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
     { id: 'keyword', label: 'Mots-clés' }, { id: 'keyword_category', label: 'Catég. mots-clés' },
     { id: 'url', label: 'URLs' }, { id: 'url_category', label: 'Catég. URLs' },
   ]
-  const SORT_KW: { id: SortMode; label: string }[] = [
-    { id: 'alpha', label: 'A→Z' },
-    { id: 'gainloss', label: gainLossAsc ? '↓ Pertes' : '↑ Gains' },
-    { id: 'pos_start', label: 'Pos. début' },
-    { id: 'pos_end', label: 'Pos. fin' },
-    { id: 'volume', label: 'Vol.' },
+  const SORT_KW: { id: SortMode; label: string; defaultAsc: boolean }[] = [
+    { id: 'alpha',     label: 'A→Z',        defaultAsc: true  },
+    { id: 'gainloss',  label: gainLossAsc ? '↓ Pertes' : '↑ Gains', defaultAsc: false },
+    { id: 'pos_start', label: 'Pos. début',  defaultAsc: true  },
+    { id: 'pos_end',   label: 'Pos. fin',    defaultAsc: true  },
+    { id: 'volume',    label: 'Vol.',         defaultAsc: false },
   ]
-  const SORT_GROUP: { id: SortMode; label: string }[] = [{ id: 'alpha', label: 'A→Z' }, { id: 'count', label: '# MC' }, { id: 'gainloss', label: gainLossAsc ? '↓ Pertes' : '↑ Gains' }]
+  const SORT_GROUP: { id: SortMode; label: string; defaultAsc: boolean }[] = [
+    { id: 'alpha',    label: 'A→Z',  defaultAsc: true  },
+    { id: 'count',    label: '# MC', defaultAsc: false },
+    { id: 'gainloss', label: gainLossAsc ? '↓ Pertes' : '↑ Gains', defaultAsc: false },
+  ]
   const activeSortModes = viewMode === 'keyword' ? SORT_KW : SORT_GROUP
   const showMedianToggle = true  // available in all views
 
@@ -1494,13 +1500,21 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
               className="rounded px-2 py-0.5 text-[11px] flex-1 focus:outline-none"
               style={{ background: '#0d1f1f', border: '1px solid #1a3535', color: C_WHITE }} />
             <div className="flex gap-px rounded p-0.5 flex-shrink-0" style={{background:'#0d1f1f'}}>
-              {activeSortModes.map(m => (
-                <button key={m.id} onClick={() => {
-                  if (m.id === 'gainloss' && sortMode === 'gainloss') setGainLossAsc(p => !p)
-                  else setSortMode(m.id)
-                }} className="px-2 py-0.5 rounded text-[9px] transition-colors"
-                  style={sortMode===m.id?{background:C_PRIMARY,color:C_WHITE}:{color:'#4a7a7a'}}>{m.label}</button>
-              ))}
+              {activeSortModes.map(m => {
+                const isActive = sortMode === m.id
+                const showDir = isActive && m.id !== 'gainloss'
+                const dirArrow = showDir ? (sortAsc ? ' ↑' : ' ↓') : ''
+                return (
+                  <button key={m.id} onClick={() => {
+                    if (m.id === 'gainloss' && sortMode === 'gainloss') { setGainLossAsc(p => !p); return }
+                    if (isActive && m.id !== 'gainloss') { setSortAsc(p => !p); return }
+                    setSortMode(m.id); setSortAsc(m.defaultAsc)
+                  }} className="px-2 py-0.5 rounded text-[9px] transition-colors"
+                    style={isActive ? {background:C_PRIMARY,color:C_WHITE} : {color:'#4a7a7a'}}>
+                    {m.label}{dirArrow}
+                  </button>
+                )
+              })}
             </div>
             {multiSelect.size > 0 && (
               <button onClick={() => { setMultiSelect(new Set()); setHovered(null) }}

@@ -17,6 +17,7 @@ export interface Keyword {
   latestPosition: number | null; url: string | null; volume: number | null
   tags: KeywordCategory[]
   cannibalised: boolean
+  is_starred: boolean
 }
 
 export function useKeywordsData() {
@@ -28,7 +29,7 @@ export function useKeywordsData() {
   async function load() {
     setLoading(true)
     const [kwRes, catRes, tagRes, posRes, cannRes] = await Promise.all([
-      supabase.from('keywords').select('id, keyword, language').order('keyword'),
+      supabase.from('keywords').select('id, keyword, language, volume, is_starred').order('keyword'),
       supabase.from('keyword_categories').select('id, name, color').order('name'),
       supabase.from('keyword_tags').select('keyword_id, category_id, keyword_categories(id, name, color)'),
       supabase.from('positions').select('keyword_id, position, url_id, urls(url)').order('date', { ascending: false }),
@@ -52,9 +53,10 @@ export function useKeywordsData() {
     setKeywords((kwRes.data ?? []).map((kw: any) => ({
       id: kw.id, keyword: kw.keyword, language: kw.language ?? 'fr',
       latestPosition: latestByKw[kw.id]?.position ?? null,
-      url: latestByKw[kw.id]?.url ?? null, volume: null,
+      url: latestByKw[kw.id]?.url ?? null, volume: kw.volume ?? null,
       tags: tagsByKw[kw.id] ?? [],
       cannibalised: cannKwIds.has(kw.id),
+      is_starred: kw.is_starred ?? false,
     })))
     setCategories(catRes.data ?? [])
 
@@ -72,6 +74,12 @@ export function useKeywordsData() {
   useEffect(() => { load() }, [])
   const loadRef = useRef(load)
   useEffect(() => { loadRef.current = load })
+
+  const toggleStar = useCallback(async (kwId: string, starred: boolean) => {
+    // Optimistic update
+    setKeywords(prev => prev.map(k => k.id === kwId ? { ...k, is_starred: starred } : k))
+    await supabase.from('keywords').update({ is_starred: starred }).eq('id', kwId)
+  }, [])
 
   const addTag = useCallback(async (kwId: string, catId: string) => {
     await supabase.from('keyword_tags').upsert({ keyword_id: kwId, category_id: catId })
@@ -108,5 +116,5 @@ export function useKeywordsData() {
     await loadRef.current()
   }, [])
 
-  return { keywords, categories, cannibalisations, loading, addTag, removeTag, createAndAddTag, bulkAddTag, applyRegexTag, deleteCategory, reload: load }
+  return { keywords, categories, cannibalisations, loading, toggleStar, addTag, removeTag, createAndAddTag, bulkAddTag, applyRegexTag, deleteCategory, reload: load }
 }

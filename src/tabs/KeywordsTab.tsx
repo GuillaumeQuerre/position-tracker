@@ -4,12 +4,25 @@ import { MultiTagSelector } from '../components/MultiTagSelector'
 import { RegexTagger } from '../components/RegexTagger'
 import { PositionBadge } from '../components/PositionBadge'
 import { SkeletonTable } from '../components/SkeletonLoader'
+import { useAppStore } from '../store/useAppStore'
 
 const C = { bg: '#071212', border: '#1a3535', surface: '#0d1f1f', primary: '#317979', light: '#a3f1eb', text: '#f6f6f6', muted: '#4a7a7a', dim: '#2a5050' }
 const PAGE_SIZE = 150
 
+type SortCol = 'keyword' | 'position' | 'volume' | 'opportunity'
+type SortDir = 'asc' | 'desc'
+
+function SortIcon({ col, active, dir }: { col: string; active: boolean; dir: SortDir }) {
+  return (
+    <span style={{ marginLeft: 4, fontSize: 9, opacity: active ? 1 : 0.3, color: active ? '#a3f1eb' : '#4a7a7a' }}>
+      {active ? (dir === 'asc' ? '↑' : '↓') : '↕'}
+    </span>
+  )
+}
+
 export function KeywordsTab() {
-  const { keywords, categories, cannibalisations, loading, addTag, removeTag, createAndAddTag, bulkAddTag, applyRegexTag, deleteCategory } = useKeywordsData()
+  const { keywords, categories, cannibalisations, loading, toggleStar, addTag, removeTag, createAndAddTag, bulkAddTag, applyRegexTag, deleteCategory } = useKeywordsData()
+  const { tabPrefs, setTabPrefs } = useAppStore()
   const [selected, setSelected] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -18,7 +31,17 @@ export function KeywordsTab() {
   const [showCatManager, setShowCatManager] = useState(false)
   const [showCannibalisations, setShowCannibalisations] = useState(false)
   const [filterCannibalised, setFilterCannibalised] = useState(false)
+  const [filterQuickWin, setFilterQuickWin] = useState(false)
+  const [filterStarred, setFilterStarred] = useState(false)
   const [page, setPage] = useState(1)
+  const sortCol = tabPrefs.kwSortCol
+  const sortDir = tabPrefs.kwSortDir
+
+  function toggleSort(col: SortCol) {
+    const newDir = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : (col === 'keyword' ? 'asc' : 'desc')
+    setTabPrefs({ kwSortCol: col, kwSortDir: newDir })
+    setPage(1)
+  }
 
   // Debounce search input — 150ms avoids filtering on every keystroke
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -29,11 +52,31 @@ export function KeywordsTab() {
   }
   useEffect(() => () => { if (debounceTimer.current) clearTimeout(debounceTimer.current) }, [])
 
-  const filtered = useMemo(() => keywords.filter(kw => {
-    const matchSearch = !debouncedSearch || kw.keyword.toLowerCase().includes(debouncedSearch.toLowerCase())
-    const matchCannibal = !filterCannibalised || kw.cannibalised
-    return matchSearch && matchCannibal
-  }), [keywords, debouncedSearch, filterCannibalised])
+  const filtered = useMemo(() => {
+    let list = keywords.filter(kw => {
+      const matchSearch = !debouncedSearch || kw.keyword.toLowerCase().includes(debouncedSearch.toLowerCase())
+      const matchCannibal = !filterCannibalised || kw.cannibalised
+      const matchQuickWin = !filterQuickWin || (kw.latestPosition != null && kw.latestPosition >= 4 && kw.latestPosition <= 15)
+      const matchStarred = !filterStarred || kw.is_starred
+      return matchSearch && matchCannibal && matchQuickWin && matchStarred
+    })
+    // Opportunity score = volume × (11 - position) for pos 4-10 only
+    const withScore = list.map(kw => ({
+      ...kw,
+      opportunityScore: (kw.latestPosition != null && kw.latestPosition >= 4 && kw.latestPosition <= 10 && kw.volume != null)
+        ? kw.volume * (11 - kw.latestPosition) : 0
+    }))
+    withScore.sort((a, b) => {
+      let va: number | string, vb: number | string
+      if (sortCol === 'keyword') { va = a.keyword; vb = b.keyword }
+      else if (sortCol === 'position') { va = a.latestPosition ?? 999; vb = b.latestPosition ?? 999 }
+      else if (sortCol === 'volume') { va = a.volume ?? -1; vb = b.volume ?? -1 }
+      else { va = a.opportunityScore; vb = b.opportunityScore }
+      if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb as string, 'fr') : (vb as string).localeCompare(va, 'fr')
+      return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va
+    })
+    return withScore
+  }, [keywords, debouncedSearch, filterCannibalised, filterQuickWin, filterStarred, sortCol, sortDir])
   const allSelected = filtered.length > 0 && filtered.every(k => selected.includes(k.id))
   const cannCount = keywords.filter(k => k.cannibalised).length
 
@@ -63,6 +106,18 @@ export function KeywordsTab() {
         <input type="text" placeholder="Rechercher un mot-clé…" value={search} onChange={e => handleSearchChange(e.target.value)}
           className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors"
           style={{background: C.surface, border: `1px solid ${C.border}`, color: C.text}} />
+        <button onClick={() => { setFilterQuickWin(f => !f); setPage(1) }}
+          className="px-3 py-2 rounded-lg text-xs font-medium border transition-all whitespace-nowrap"
+          title="Positions 4-15 — potentiel de gain rapide"
+          style={filterQuickWin ? {background: C.primary, borderColor: C.primary, color: C.bg} : {background: C.surface, borderColor: C.border, color: C.muted}}>
+          ⚡ Quick wins
+        </button>
+        <button onClick={() => { setFilterStarred(f => !f); setPage(1) }}
+          className="px-3 py-2 rounded-lg text-xs font-medium border transition-all whitespace-nowrap"
+          title="Mots-clés favoris uniquement"
+          style={filterStarred ? {background: '#78350f', borderColor: '#f59e0b', color: '#fcd34d'} : {background: C.surface, borderColor: C.border, color: C.muted}}>
+          ★ Favoris
+        </button>
         <button onClick={() => setShowRegex(r => !r)}
           className="px-3 py-2 rounded-lg text-xs font-medium border transition-all"
           style={showRegex ? {background: C.primary, borderColor: C.primary, color: C.bg} : {background: C.surface, borderColor: C.border, color: C.muted}}>
@@ -183,15 +238,26 @@ export function KeywordsTab() {
               <th className="py-3 px-3 w-8">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{accentColor: C.primary}} />
               </th>
-              <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider" style={{color: C.primary}}>Mot-clé</th>
-              <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider" style={{color: C.primary}}>Position</th>
+              {([
+                { col: 'keyword', label: 'Mot-clé' },
+                { col: 'position', label: 'Position' },
+                { col: 'volume', label: 'Volume' },
+                { col: 'opportunity', label: '⚡ Score' },
+              ] as { col: SortCol; label: string }[]).map(h => (
+                <th key={h.col} onClick={() => toggleSort(h.col)}
+                  className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none"
+                  style={{color: sortCol === h.col ? C.light : C.primary}}
+                  title={h.col === 'opportunity' ? 'Volume × (11-position) pour les positions 4-10' : undefined}>
+                  {h.label}<SortIcon col={h.col} active={sortCol === h.col} dir={sortDir} />
+                </th>
+              ))}
               <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider" style={{color: C.primary}}>URL</th>
               <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider" style={{color: C.primary}}>Tags</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="py-12 text-center text-sm" style={{color: C.dim}}>Aucun mot-clé trouvé</td></tr>
+              <tr><td colSpan={7} className="py-12 text-center text-sm" style={{color: C.dim}}>Aucun mot-clé trouvé</td></tr>
             )}
             {filtered.slice(0, page * PAGE_SIZE).map(kw => (
               <tr key={kw.id} style={{
@@ -208,6 +274,15 @@ export function KeywordsTab() {
                 </td>
                 <td className="py-3 px-3 font-medium">
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleStar(kw.id, !kw.is_starred) }}
+                      className="flex-shrink-0 transition-all"
+                      title={kw.is_starred ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                      style={{ fontSize: 14, color: kw.is_starred ? '#f59e0b' : C.dim, lineHeight: 1 }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#f59e0b')}
+                      onMouseLeave={e => (e.currentTarget.style.color = kw.is_starred ? '#f59e0b' : C.dim)}>
+                      {kw.is_starred ? '★' : '☆'}
+                    </button>
                     <span style={{color: C.text}}>{kw.keyword}</span>
                     {kw.cannibalised && (
                       <span title="Cannibalisation détectée" className="text-[9px] px-1.5 py-0.5 rounded border"
@@ -216,6 +291,12 @@ export function KeywordsTab() {
                   </div>
                 </td>
                 <td className="py-3 px-3"><PositionBadge position={kw.latestPosition} /></td>
+                <td className="py-3 px-3 text-xs font-mono" style={{color: kw.volume != null ? C.muted : C.dim}}>
+                  {kw.volume != null ? (kw.volume >= 1000 ? `${(kw.volume/1000).toFixed(0)}k` : kw.volume) : '—'}
+                </td>
+                <td className="py-3 px-3 text-xs font-mono" style={{color: (kw as any).opportunityScore > 0 ? '#a3f1eb' : C.dim}}>
+                  {(kw as any).opportunityScore > 0 ? Math.round((kw as any).opportunityScore / 1000) + 'k' : '—'}
+                </td>
                 <td className="py-3 px-3 text-xs truncate max-w-xs" style={{color: kw.cannibalised ? '#f87171' : C.muted}}>{kw.url ?? '—'}</td>
                 <td className="py-3 px-3">
                   <MultiTagSelector tags={kw.tags} categories={categories}
