@@ -1,7 +1,4 @@
 // hooks/useAuth.ts
-// Gestion de session — login, signup, logout, refresh automatique
-// Session stockée dans localStorage (persist entre onglets)
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 export interface AuthUser {
@@ -40,9 +37,17 @@ async function apiAuth(action: string, body: object = {}, token?: string) {
   return data
 }
 
+// Decode JWT expiry without a library
+function getTokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.exp ? payload.exp * 1000 : null
+  } catch { return null }
+}
+
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(() => loadSession())
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -50,24 +55,57 @@ export function useAuth() {
   const token = session?.access_token ?? null
   const isSuperAdmin = user?.is_super_admin ?? false
 
-  // Auto-refresh session 5 min before expiry (tokens last 1h by default)
-  useEffect(() => {
-    if (!session?.refresh_token) return
-    const refresh = async () => {
+  // Refresh proactif — appelé au mount et à chaque changement de session
+  const scheduleRefresh = useCallback((s: Session) => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current)
+    const expiry = getTokenExpiry(s.access_token)
+    const now = Date.now()
+    // Refresh 2 minutes avant expiry, ou dans 45 min si pas d'expiry connue
+    const delay = expiry ? Math.max(0, expiry - now - 2 * 60 * 1000) : 45 * 60 * 1000
+    refreshTimer.current = setTimeout(async () => {
       try {
-        const data = await apiAuth('refresh', { refresh_token: session.refresh_token })
-        const newSession = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user }
+        const data = await apiAuth('refresh', { refresh_token: s.refresh_token })
+        const newSession: Session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user }
         saveSession(newSession)
         setSession(newSession)
       } catch {
         clearSession()
         setSession(null)
       }
+    }, delay)
+  }, [])
+
+  // Au mount : refresh immédiat si token expiré ou proche de l'expiry
+  useEffect(() => {
+    const s = loadSession()
+    if (!s) { setLoading(false); return }
+    const expiry = getTokenExpiry(s.access_token)
+    const now = Date.now()
+    const needsRefresh = !expiry || expiry - now < 5 * 60 * 1000 // expiré ou expire dans < 5 min
+
+    if (needsRefresh) {
+      // Refresh immédiat
+      apiAuth('refresh', { refresh_token: s.refresh_token })
+        .then(data => {
+          const newSession: Session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user }
+          saveSession(newSession)
+          setSession(newSession)
+          scheduleRefresh(newSession)
+        })
+        .catch(() => { clearSession(); setSession(null) })
+        .finally(() => setLoading(false))
+    } else {
+      setSession(s)
+      scheduleRefresh(s)
+      setLoading(false)
     }
-    // Refresh after 50 minutes
-    refreshTimer.current = setTimeout(refresh, 50 * 60 * 1000)
     return () => { if (refreshTimer.current) clearTimeout(refreshTimer.current) }
-  }, [session?.refresh_token])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh proactif quand la session change (nouveau login)
+  useEffect(() => {
+    if (session) scheduleRefresh(session)
+  }, [session?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback(async (email: string, password: string) => {
     setLoading(true); setError(null)
@@ -97,6 +135,7 @@ export function useAuth() {
   }, [])
 
   const logout = useCallback(() => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current)
     clearSession(); setSession(null)
   }, [])
 
@@ -110,8 +149,8 @@ export function useAuth() {
 
   const updateDisplayName = useCallback(async (displayName: string) => {
     if (!token) return
-    const data = await apiAuth('update_name', { display_name: displayName }, token)
-    if (session && data.user) {
+    await apiAuth('update_name', { display_name: displayName }, token)
+    if (session) {
       const updated = { ...session, user: { ...session.user, user_metadata: { display_name: displayName } } }
       saveSession(updated); setSession(updated)
     }
