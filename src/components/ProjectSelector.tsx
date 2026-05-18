@@ -36,10 +36,15 @@ export function ProjectSelector() {
 
   async function createProject() {
     if (!newName.trim()) return
-    const { data } = await supabase.from('projects')
+    const { data, error } = await supabase.from('projects')
       .insert({ name: newName.trim(), description: newDesc.trim() || null })
-      .select('id').single()
-    if (data) { setProjectId(data.id); setShowCreate(false); setNewName(''); setNewDesc('') }
+      .select('id, name, description').single()
+    if (error) { console.error('createProject error:', error); alert(error.message); return }
+    if (data) {
+      setProjects(prev => [...prev, data])
+      setProjectId(data.id)
+      setShowCreate(false); setNewName(''); setNewDesc('')
+    }
     await load()
   }
 
