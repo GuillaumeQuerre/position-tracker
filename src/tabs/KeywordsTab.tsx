@@ -12,7 +12,7 @@ const PAGE_SIZE = 150
 type SortCol = 'keyword' | 'position' | 'volume' | 'opportunity'
 type SortDir = 'asc' | 'desc'
 
-function SortIcon({ col, active, dir }: { col: string; active: boolean; dir: SortDir }) {
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   return (
     <span style={{ marginLeft: 4, fontSize: 9, opacity: active ? 1 : 0.3, color: active ? '#a3f1eb' : '#4a7a7a' }}>
       {active ? (dir === 'asc' ? '↑' : '↓') : '↕'}
@@ -43,7 +43,6 @@ export function KeywordsTab() {
     setPage(1)
   }
 
-  // Debounce search input — 150ms avoids filtering on every keystroke
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function handleSearchChange(value: string) {
     setSearch(value)
@@ -60,7 +59,6 @@ export function KeywordsTab() {
       const matchStarred = !filterStarred || kw.is_starred
       return matchSearch && matchCannibal && matchQuickWin && matchStarred
     })
-    // Opportunity score = volume × (11 - position) for pos 4-10 only
     const withScore = list.map(kw => ({
       ...kw,
       opportunityScore: (kw.latestPosition != null && kw.latestPosition >= 4 && kw.latestPosition <= 10 && kw.volume != null)
@@ -77,6 +75,7 @@ export function KeywordsTab() {
     })
     return withScore
   }, [keywords, debouncedSearch, filterCannibalised, filterQuickWin, filterStarred, sortCol, sortDir])
+
   const allSelected = filtered.length > 0 && filtered.every(k => selected.includes(k.id))
   const cannCount = keywords.filter(k => k.cannibalised).length
 
@@ -239,16 +238,16 @@ export function KeywordsTab() {
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{accentColor: C.primary}} />
               </th>
               {([
-                { col: 'keyword', label: 'Mot-clé' },
-                { col: 'position', label: 'Position' },
-                { col: 'volume', label: 'Volume' },
+                { col: 'keyword',     label: 'Mot-clé' },
+                { col: 'position',    label: 'Position' },
+                { col: 'volume',      label: 'Volume' },
                 { col: 'opportunity', label: '⚡ Score' },
               ] as { col: SortCol; label: string }[]).map(h => (
                 <th key={h.col} onClick={() => toggleSort(h.col)}
                   className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none"
                   style={{color: sortCol === h.col ? C.light : C.primary}}
                   title={h.col === 'opportunity' ? 'Volume × (11-position) pour les positions 4-10' : undefined}>
-                  {h.label}<SortIcon col={h.col} active={sortCol === h.col} dir={sortDir} />
+                  {h.label}<SortIcon active={sortCol === h.col} dir={sortDir} />
                 </th>
               ))}
               <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider" style={{color: C.primary}}>URL</th>
