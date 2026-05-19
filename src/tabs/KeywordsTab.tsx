@@ -5,6 +5,7 @@ import { RegexTagger } from '../components/RegexTagger'
 import { PositionBadge } from '../components/PositionBadge'
 import { SkeletonTable } from '../components/SkeletonLoader'
 import { useAppStore } from '../store/useAppStore'
+import { AISegmentButton } from '../components/AISegmentModal'
 
 const C = { bg: '#071212', border: '#1a3535', surface: '#0d1f1f', primary: '#317979', light: '#a3f1eb', text: '#f6f6f6', muted: '#4a7a7a', dim: '#2a5050' }
 const PAGE_SIZE = 150
@@ -170,6 +171,7 @@ export function KeywordsTab() {
           style={showCatManager ? {background: C.primary, borderColor: C.primary, color: C.bg} : {background: C.surface, borderColor: C.border, color: C.muted}}>
           Catégories
         </button>
+        <AISegmentButton mode="keywords" onDone={() => window.location.reload()} />
         {cannCount > 0 && (
           <button onClick={() => { setFilterCannibalised(f => !f); setShowCannibalisations(s => !s) }}
             className="px-3 py-2 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5"
