@@ -21,13 +21,8 @@ export function ProjectSelector() {
   const load = useCallback(async () => {
     const { data } = await supabase.from('projects').select('id, name, description').order('created_at')
     const list = data ?? []
-    // Ensure default project always exists in UI
-    if (!list.find(p => p.id === DEFAULT_PROJECT_ID)) {
-      list.unshift({ id: DEFAULT_PROJECT_ID, name: 'Projet principal', description: null })
-    }
     setProjects(list)
-    // Set default project if none selected
-    if (!projectId) setProjectId(list[0]?.id ?? DEFAULT_PROJECT_ID)
+    if (!projectId && list.length > 0) setProjectId(list[0].id)
   }, [projectId, setProjectId])
 
   useEffect(() => { load() }, [load])
