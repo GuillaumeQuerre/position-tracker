@@ -675,6 +675,11 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   // Pending date range — local edit buffer, applied only on confirm
   const [pendingRange, setPendingRange] = useState(dateRange)
   const pendingChanged = pendingRange.from !== dateRange.from || pendingRange.to !== dateRange.to
+
+  // Sync pendingRange when dateRange is updated externally (e.g. after apply)
+  useEffect(() => {
+    setPendingRange(dateRange)
+  }, [dateRange.from, dateRange.to])
   const _useActions = useActions() as any
   const allActions: Action[] = _useActions.actions ?? []
   const actionCategories: { id: string; name: string; color: string }[] = _useActions.categories ?? []
