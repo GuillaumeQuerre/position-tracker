@@ -1359,8 +1359,23 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
             </div>
           ) : chartMode === 'suivi' ? (
             <div className="relative w-full h-full">
-              {/* Mode Suivi — axes uniquement, pas de courbes */}
-              <BgChart series={series} bgKeywords={[]} importDates={importDates} hasSelection={false} />
+              {/* Mode Suivi — axes + actions. Courbes visibles si une action est sélectionnée */}
+              <BgChart series={series} bgKeywords={selectedAction ? [] : []} importDates={importDates} hasSelection={!!selectedAction} />
+              {selectedAction && (
+                <>
+                  <div className="absolute inset-0">
+                    <BgChart series={series} bgKeywords={bgKeywords} importDates={importDates} hasSelection={true} />
+                  </div>
+                  <div className="absolute inset-0 pointer-events-none">
+                    <HighlightChart
+                      series={series}
+                      highlightedKeywords={[]}
+                      actionKeywords={actionHighlightedKeywords}
+                      actionSeries={actionNulledSeries}
+                    />
+                  </div>
+                </>
+              )}
               <ActionFlagsOverlay
                 actions={relevantActions} dates={dates} series={series}
                 kwUrlMap={kwUrlMap} allKwIds={allKwIds}
