@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase'
 import type { Action } from '../types/actions'
 
 type ViewMode = 'keyword' | 'keyword_category' | 'url' | 'url_category'
-type ChartMode = 'keywords' | 'median'
+type ChartMode = 'suivi' | 'keywords' | 'median'
 type SortMode = 'alpha' | 'count' | 'gainloss' | 'volume' | 'pos_start' | 'pos_end'
 
 interface BaseMeta { id: string; label: string; color: string; source?: 'imported' | 'manual' }
@@ -687,7 +687,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // ── LOCAL STATE ──────────────────────────────────────────────────────────
   const [viewMode, setViewMode]           = useState<ViewMode>('keyword')
-  const [chartMode, setChartMode]         = useState<ChartMode>('keywords')
+  const [chartMode, setChartMode]         = useState<ChartMode>('suivi')
   const [displayMode, setDisplayMode]     = useState<'position' | 'volume'>('position')
   const [sortMode, setSortMode]           = useState<SortMode>('alpha')
   const [gainLossAsc, setGainLossAsc]     = useState(false)
@@ -762,7 +762,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // Recalculated only when chartMode/viewMode/data changes
   const { medianSeries, medianGroups } = useMemo(() => {
-    if (chartMode !== 'median') return { medianSeries: [] as any[], medianGroups: [] as { id: string; label: string; color: string }[] }
+    if (chartMode === 'keywords') return { medianSeries: [] as any[], medianGroups: [] as { id: string; label: string; color: string }[] }
 
     if (viewMode === 'keyword') {
       // Single average line across all keywords
@@ -787,7 +787,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // Audit stats for average mode — recalculate based on groups instead of keywords
   const avgModeAuditStats = useMemo(() => {
-    if (chartMode !== 'median') return null
+    if (chartMode === 'keywords') return null
     const base: BaseMeta[] = viewMode === 'keyword'
       ? [{ id: 'all', label: 'Tous', color: '#c5a55a' }]
       : viewMode === 'keyword_category' ? kwCategories : viewMode === 'url' ? urlMeta : urlCategories
@@ -998,7 +998,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // Highlighted median groups (for median chart overlay)
   const highlightedMedianGroups = useMemo(() => {
-    if (!activeId || chartMode !== 'median') return []
+    if (!activeId || chartMode === 'keywords') return []
     return medianGroups.filter(g => g.id === activeId)
   }, [activeId, chartMode, medianGroups])
 
@@ -1287,6 +1287,8 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
           {displayMode === 'position' && showMedianToggle && (
             <div className="flex rounded p-0.5 ml-1" style={{background:'#0d1f1f'}}>
+              <button onClick={() => setChartMode('suivi')} className="px-2 py-0.5 rounded text-[10px] transition-colors"
+                style={chartMode==='suivi'?{background:C_PRIMARY,color:C_WHITE}:{color:'#4a7a7a'}} >Suivi</button>
               <button onClick={() => setChartMode('keywords')} className="px-2 py-0.5 rounded text-[10px] transition-colors"
                 style={chartMode==='keywords'?{background:C_PRIMARY,color:C_WHITE}:{color:'#4a7a7a'}} >MC</button>
               <button onClick={() => setChartMode('median')} className="px-2 py-0.5 rounded text-[10px] transition-colors"
@@ -1343,11 +1345,28 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
           ) : series.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-2" style={{color:'#317979'}}><p>Aucune donnée</p><p className="text-sm">Importez un CSV.</p></div>
           ) : chartMode === 'median' ? (
-            <UnifiedMedianChart
-              medianSeries={medianSeries}
-              groups={medianGroups}
-              highlightedGroups={highlightedMedianGroups}
-            />
+            <div className="relative w-full h-full">
+              <UnifiedMedianChart
+                medianSeries={medianSeries}
+                groups={medianGroups}
+                highlightedGroups={highlightedMedianGroups}
+              />
+              <ActionFlagsOverlay
+                actions={relevantActions} dates={dates} series={series}
+                kwUrlMap={kwUrlMap} allKwIds={allKwIds}
+                selectedActionId={selectedAction?.id ?? null} onClickAction={handleClickAction}
+              />
+            </div>
+          ) : chartMode === 'suivi' ? (
+            <div className="relative w-full h-full">
+              {/* Mode Suivi — axes uniquement, pas de courbes */}
+              <BgChart series={series} bgKeywords={[]} importDates={importDates} hasSelection={false} />
+              <ActionFlagsOverlay
+                actions={relevantActions} dates={dates} series={series}
+                kwUrlMap={kwUrlMap} allKwIds={allKwIds}
+                selectedActionId={selectedAction?.id ?? null} onClickAction={handleClickAction}
+              />
+            </div>
           ) : (
             <div className="relative w-full h-full">
               {/* BgChart: stable, never re-renders on hover */}
@@ -1380,7 +1399,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
         <div className="flex flex-col rounded-xl overflow-hidden min-w-0" style={{ flex: '0 0 260px', background: '#071212', border: '1px solid #1a3535' }}>
           <div className="px-3 py-2 flex items-center justify-between flex-shrink-0" style={{ borderBottom: '1px solid #1a3535' }}>
             <span className="text-[10px] font-bold uppercase tracking-widest" style={{color: C_PRIMARY}}>
-              {chartMode === 'median' && avgModeAuditStats ? 'Moyennes' : 'Récapitulatif'}
+              {chartMode === 'median' && avgModeAuditStats ? 'Moyennes' : chartMode === 'suivi' ? 'Actions' : 'Récapitulatif'}
             </span>
             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#0d1f1f', color: '#4a7a7a' }}>
               {chartMode === 'median' && avgModeAuditStats ? avgModeAuditStats.total : auditStats.total} mc
