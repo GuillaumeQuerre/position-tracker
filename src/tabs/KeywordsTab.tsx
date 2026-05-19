@@ -33,6 +33,7 @@ export function KeywordsTab() {
   const [filterCannibalised, setFilterCannibalised] = useState(false)
   const [filterQuickWin, setFilterQuickWin] = useState(false)
   const [filterStarred, setFilterStarred] = useState(false)
+  const [filterLang, setFilterLang] = useState('')
   const [page, setPage] = useState(1)
   const sortCol = tabPrefs.kwSortCol
   const sortDir = tabPrefs.kwSortDir
@@ -51,13 +52,20 @@ export function KeywordsTab() {
   }
   useEffect(() => () => { if (debounceTimer.current) clearTimeout(debounceTimer.current) }, [])
 
+  // Languages available in current dataset
+  const availableLangs = useMemo(() => {
+    const langs = [...new Set(keywords.map(k => k.language).filter(Boolean))]
+    return langs.sort()
+  }, [keywords])
+
   const filtered = useMemo(() => {
     let list = keywords.filter(kw => {
       const matchSearch = !debouncedSearch || kw.keyword.toLowerCase().includes(debouncedSearch.toLowerCase())
       const matchCannibal = !filterCannibalised || kw.cannibalised
       const matchQuickWin = !filterQuickWin || (kw.latestPosition != null && kw.latestPosition >= 4 && kw.latestPosition <= 15)
       const matchStarred = !filterStarred || kw.is_starred
-      return matchSearch && matchCannibal && matchQuickWin && matchStarred
+      const matchLang = !filterLang || kw.language === filterLang
+      return matchSearch && matchCannibal && matchQuickWin && matchStarred && matchLang
     })
     const withScore = list.map(kw => ({
       ...kw,
@@ -74,7 +82,7 @@ export function KeywordsTab() {
       return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va
     })
     return withScore
-  }, [keywords, debouncedSearch, filterCannibalised, filterQuickWin, filterStarred, sortCol, sortDir])
+  }, [keywords, debouncedSearch, filterCannibalised, filterQuickWin, filterStarred, filterLang, sortCol, sortDir])
 
   const allSelected = filtered.length > 0 && filtered.every(k => selected.includes(k.id))
   const cannCount = keywords.filter(k => k.cannibalised).length
@@ -117,6 +125,14 @@ export function KeywordsTab() {
           style={filterStarred ? {background: '#78350f', borderColor: '#f59e0b', color: '#fcd34d'} : {background: C.surface, borderColor: C.border, color: C.muted}}>
           ★ Favoris
         </button>
+        {availableLangs.length > 1 && (
+          <select value={filterLang} onChange={e => { setFilterLang(e.target.value); setPage(1) }}
+            className="px-2 py-2 rounded-lg text-xs font-medium border focus:outline-none cursor-pointer appearance-none"
+            style={{ background: filterLang ? '#1a2a3a' : C.surface, borderColor: filterLang ? C.primary : C.border, color: filterLang ? C.light : C.muted }}>
+            <option value="">Toutes langues</option>
+            {availableLangs.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+          </select>
+        )}
         <button onClick={() => setShowRegex(r => !r)}
           className="px-3 py-2 rounded-lg text-xs font-medium border transition-all"
           style={showRegex ? {background: C.primary, borderColor: C.primary, color: C.bg} : {background: C.surface, borderColor: C.border, color: C.muted}}>

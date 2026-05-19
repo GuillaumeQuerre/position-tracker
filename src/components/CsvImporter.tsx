@@ -17,6 +17,19 @@ interface ConflictInfo {
   rows: ParsedRow[]
 }
 
+const LANGUAGES = [
+  { code: 'fr', label: 'Français' },
+  { code: 'en', label: 'English' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'es', label: 'Español' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'pt', label: 'Português' },
+  { code: 'nl', label: 'Nederlands' },
+  { code: 'pl', label: 'Polski' },
+]
+
+const C = { bg: '#071212', surface: '#0d1f1f', border: '#1a3535', primary: '#317979', light: '#a3f1eb', text: '#f6f6f6', muted: '#4a7a7a' }
+
 function parseCSVLine(line: string): string[] {
   const cols: string[] = []
   let current = ''
@@ -34,7 +47,6 @@ function parseCSVLine(line: string): string[] {
 function parseSemrushCsv(text: string): { rows: ParsedRow[]; date: string } {
   const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   let date = new Date().toISOString().split('T')[0]
-  // Extract date from Period line OR from column header pattern _YYYYMMDD
   for (const line of lines) {
     const m = line.match(/Period:\s*(\d{8})\s*-\s*(\d{8})/)
     if (m) { const r = m[2]; date = r.slice(0,4)+'-'+r.slice(4,6)+'-'+r.slice(6,8); break }
@@ -42,45 +54,26 @@ function parseSemrushCsv(text: string): { rows: ParsedRow[]; date: string } {
   const hi = lines.findIndex(l => l.trim().startsWith('Keyword'))
   if (hi === -1) throw new Error('En-tête "Keyword" introuvable')
   const headers = parseCSVLine(lines[hi])
-
-  // --- Column detection (handles both classic and position-tracking-overview format) ---
-
-  // Position col: col 1 by default, but check for dynamic PATTERN_DATE col
   let positionColIdx = 1
-
-  // Tags
   const tagIdx = headers.findIndex(h => h === 'Tags')
-
-  // Landing URL: try exact names first, then _DATE_landing pattern
   const landingIdx = (() => {
     const names = ['URL', 'Landing URL', 'Landing', 'url', 'landing url']
-    for (const n of names) {
-      const i = headers.findIndex(h => h === n); if (i >= 0) return i
-    }
+    for (const n of names) { const i = headers.findIndex(h => h === n); if (i >= 0) return i }
     return headers.findIndex(h => /_\d{8}_landing$/i.test(h))
   })()
-
-  // Volume
   const volumeIdx = headers.findIndex(h => h === 'Volume' || h === 'Search Volume')
-
-  // If col 1 is a dynamic PATTERN_DATE column, extract date from it
   const col1DateMatch = headers[1]?.match(/_(\d{8})$/)
   if (col1DateMatch && !headers[1]?.includes('_type') && !headers[1]?.includes('_landing')) {
     const raw = col1DateMatch[1]
     date = raw.slice(0,4)+'-'+raw.slice(4,6)+'-'+raw.slice(6,8)
     positionColIdx = 1
   }
-
-  console.log(`Colonnes — pos:${positionColIdx} Tags:${tagIdx} Landing:${landingIdx}(${headers[landingIdx]??'—'}) Volume:${volumeIdx}(${headers[volumeIdx]??'—'}) date:${date}`)
-
   const rows: ParsedRow[] = []
   for (let i = hi + 1; i < lines.length; i++) {
     const line = lines[i].trim(); if (!line) continue
-    // Skip separator lines
     if (line.startsWith('-')) continue
     const cols = parseCSVLine(line)
     const keyword = cols[0]?.replace(/^"|"$/g, '').trim(); if (!keyword) continue
-    // Skip lines that look like metadata (no valid position)
     const posRaw = cols[positionColIdx]?.replace(/^"|"$/g, '').trim()
     let position = parseInt(posRaw ?? '')
     if (isNaN(position) || position < 1) position = 100
@@ -94,7 +87,6 @@ function parseSemrushCsv(text: string): { rows: ParsedRow[]; date: string } {
     }
     rows.push({ keyword, position, url, tag, volume, date })
   }
-  console.log('📄 Standard:', rows.length, 'mots-clés · date:', date)
   return { rows, date }
 }
 
@@ -105,38 +97,24 @@ function parseExtendedSemrushCsv(text: string): ParsedRow[] {
   const headers = parseCSVLine(lines[hi])
   const tagIdx = headers.findIndex(h => h === 'Tags')
   const volumeIdx = headers.findIndex(h => h === 'Search Volume')
-
   interface DateCol { date: string; colIdx: number; landingColIdx: number | null }
   const dateCols: DateCol[] = []
-
-  // Collect all date columns by scanning ALL headers (not just from col 3)
-  // A date col: has _YYYYMMDD as suffix, is not _type, not _landing, not _visibility, not _difference
   for (let c = 1; c < headers.length; c++) {
-    const h = headers[c]
-    if (!h) continue
-    // Must contain a date pattern
+    const h = headers[c]; if (!h) continue
     if (!/_\d{8}/.test(h)) continue
-    // Skip suffix columns
     if (/_\d{8}_type$/i.test(h)) continue
     if (/_\d{8}_landing$/i.test(h)) continue
     if (/_\d{8}_visibility$/i.test(h)) continue
-    if (h.endsWith('_difference')) continue
-    if (h.endsWith('_visibility_difference')) continue
-    // Must end with _YYYYMMDD (position column)
-    const m = h.match(/_(\d{8})$/)
-    if (!m) continue
+    if (h.endsWith('_difference') || h.endsWith('_visibility_difference')) continue
+    const m = h.match(/_(\d{8})$/); if (!m) continue
     const raw = m[1]
     const date = raw.slice(0,4)+'-'+raw.slice(4,6)+'-'+raw.slice(6,8)
-    // Avoid duplicates
     if (dateCols.some(d => d.date === date)) continue
     const landingKey = `_${raw}_landing`
     const landingColIdx = headers.findIndex(hh => hh.endsWith(landingKey))
     dateCols.push({ date, colIdx: c, landingColIdx: landingColIdx >= 0 ? landingColIdx : null })
   }
-
   if (dateCols.length === 0) throw new Error('Aucune colonne de date dans l\'export étendu')
-  console.log('📄 Étendu:', dateCols.length, 'dates:', dateCols.map(d => d.date))
-
   const rows: ParsedRow[] = []
   for (let i = hi + 1; i < lines.length; i++) {
     const line = lines[i].trim(); if (!line || line.startsWith('-')) continue
@@ -158,120 +136,121 @@ function parseExtendedSemrushCsv(text: string): ParsedRow[] {
       rows.push({ keyword, position, url, tag, volume, date })
     }
   }
-  const uniqueDates = [...new Set(rows.map(r => r.date))].sort()
-  console.log('✅', rows.length, 'entrées ·', uniqueDates.length, 'dates ·', new Set(rows.map(r=>r.keyword)).size, 'mots-clés')
   return rows
 }
 
 function detectAndParseCsv(text: string): { rows: ParsedRow[]; dates: string[]; isExtended: boolean } {
   const headerLine = text.replace(/\r\n/g,'\n').split('\n').find(l => l.trim().startsWith('Keyword')) ?? ''
   const headers = parseCSVLine(headerLine)
-
-  // Count distinct dates in column headers — if >1, it's truly extended (multi-date)
-  const dateDates = new Set<string>()
-  for (const h of headers) {
-    const m = h.match(/_(\d{8})/)
-    if (m) dateDates.add(m[1])
-  }
-  const isExtended = dateDates.size > 1
-
-  if (isExtended) {
+  const dateColCount = headers.filter(h => /_\d{8}$/.test(h) && !/_type$/.test(h) && !/_landing$/.test(h) && !/_visibility$/.test(h) && !h.endsWith('_difference')).length
+  if (dateColCount > 1) {
     const rows = parseExtendedSemrushCsv(text)
-    return { rows, dates: [...new Set(rows.map(r => r.date))].sort(), isExtended: true }
-  } else {
-    const { rows, date } = parseSemrushCsv(text)
-    return { rows, dates: [date], isExtended: false }
+    const dates = [...new Set(rows.map(r => r.date))].sort()
+    return { rows, dates, isExtended: true }
   }
+  const { rows, date } = parseSemrushCsv(text)
+  return { rows, dates: [date], isExtended: false }
 }
 
 async function importRows(
-  rows: ParsedRow[], projectId: string, overwrite: boolean,
+  rows: ParsedRow[], projectId: string, language: string, overwrite: boolean,
   onProgress: (n: number) => void
-): Promise<{ imported: number; skipped: number; errors: number; volumeUpdated: number; cannibalisations: number }> {
+) {
   let imported = 0, skipped = 0, errors = 0, volumeUpdated = 0, cannibalisations = 0
-  const today = new Date().toISOString().split('T')[0]
+
+  // Pre-fetch or create all keywords at once
+  const uniqueKeywords = [...new Set(rows.map(r => r.keyword))]
+  const { data: existingKws } = await supabase.from('keywords')
+    .select('id, keyword, volume').eq('project_id', projectId).in('keyword', uniqueKeywords)
+  const kwMap = new Map<string, { id: string; volume: number | null }>()
+  for (const kw of existingKws ?? []) kwMap.set(kw.keyword, { id: kw.id, volume: kw.volume })
+
+  // Insert missing keywords with language
+  const missingKws = uniqueKeywords.filter(k => !kwMap.has(k))
+  if (missingKws.length > 0) {
+    const { data: newKws } = await supabase.from('keywords')
+      .insert(missingKws.map(k => ({ keyword: k, project_id: projectId, language })))
+      .select('id, keyword, volume')
+    for (const kw of newKws ?? []) kwMap.set(kw.keyword, { id: kw.id, volume: kw.volume })
+  }
+
+  // Pre-fetch or create URLs
+  const uniqueUrls = [...new Set(rows.map(r => r.url).filter(Boolean) as string[])]
+  const urlMap = new Map<string, string>()
+  if (uniqueUrls.length > 0) {
+    const { data: existingUrls } = await supabase.from('urls').select('id, url').in('url', uniqueUrls)
+    for (const u of existingUrls ?? []) urlMap.set(u.url, u.id)
+    const missingUrls = uniqueUrls.filter(u => !urlMap.has(u))
+    if (missingUrls.length > 0) {
+      const { data: newUrls } = await supabase.from('urls')
+        .insert(missingUrls.map(u => ({ url: u, project_id: projectId }))).select('id, url')
+      for (const u of newUrls ?? []) urlMap.set(u.url, u.id)
+    }
+  }
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
     try {
-      // 1. Upsert keyword
-      const { data: kw, error: kwErr } = await supabase
-        .from('keywords').upsert({ keyword: row.keyword, project_id: projectId }, { onConflict: 'keyword,project_id' })
-        .select('id').single()
-      if (kwErr || !kw) { errors++; onProgress(i + 1); continue }
+      const kw = kwMap.get(row.keyword); if (!kw) { errors++; continue }
+      const urlId = row.url ? urlMap.get(row.url) ?? null : null
 
-      // 2. Update volume
-      if (row.volume != null) {
-        const { error: ve } = await supabase.from('keywords').update({ volume: row.volume }).eq('id', kw.id)
-        if (!ve) volumeUpdated++
+      // Update volume if changed
+      if (row.volume != null && row.volume !== kw.volume) {
+        await supabase.from('keywords').update({ volume: row.volume }).eq('id', kw.id)
+        kw.volume = row.volume; volumeUpdated++
       }
 
-      // 3. Upsert URL
-      let urlId: string | null = null
-      if (row.url) {
-        const { data: urlRow } = await supabase
-          .from('urls').upsert({ url: row.url }, { onConflict: 'url' })
-          .select('id').single()
-        urlId = urlRow?.id ?? null
-      }
-
-      // 4. Tag
-      if (row.tag) {
-        const { data: cat } = await supabase.from('keyword_categories')
-          .upsert({ name: row.tag, color: '#317979' }, { onConflict: 'name' }).select('id').single()
-        if (cat) await supabase.from('keyword_tags').upsert({ keyword_id: kw.id, category_id: cat.id })
-      }
-
-      // 5. Get the most recent existing position for this keyword (to check current URL)
       const { data: currentPos } = await supabase.from('positions')
-        .select('id, url_id, date')
-        .eq('keyword_id', kw.id)
-        .not('url_id', 'is', null)
-        .order('date', { ascending: false })
-        .limit(1)
+        .select('id, position, url_id').eq('keyword_id', kw.id).eq('date', row.date).eq('project_id', projectId)
 
-      const currentUrlId = currentPos?.[0]?.url_id ?? null
-
-      // 6. URL change detection
-      if (urlId && currentUrlId && urlId !== currentUrlId) {
-        // URL changed → record cannibalisation (upsert by keyword+date to avoid duplicates)
-        await supabase.from('cannibalisation').upsert(
-          { keyword_id: kw.id, old_url_id: currentUrlId, new_url_id: urlId, detected_at: today },
-          { onConflict: 'keyword_id,detected_at' }
-        )
-        cannibalisations++
-      }
-
-      // 7. Check existing position for this specific date
-      const { data: existing } = await supabase.from('positions')
-        .select('id, url_id').eq('keyword_id', kw.id).eq('date', row.date).limit(1)
-
-      if (existing?.length) {
-        if (!overwrite) { skipped++; onProgress(i + 1); continue }
-        // Update — always update url_id if we have a new one; if no new url, keep existing
+      if (currentPos && currentPos.length > 0) {
+        if (!overwrite) { skipped++; continue }
         const updatePayload: any = { position: row.position, project_id: projectId }
         if (urlId) updatePayload.url_id = urlId
-        await supabase.from('positions').update(updatePayload).eq('id', existing[0].id)
+        await supabase.from('positions').update(updatePayload).eq('id', currentPos[0].id)
         imported++
       } else {
-        // New position — always set url_id if we have one
         const { error: pe } = await supabase.from('positions').insert(
           { keyword_id: kw.id, url_id: urlId, position: row.position, date: row.date, project_id: projectId }
         )
         if (pe) { errors++ } else { imported++ }
-
-        // If this is a new position and we now have an url but the keyword had no url before,
-        // also patch the most recent existing position if its url_id is null
         if (urlId && currentPos?.length && !currentPos[0].url_id) {
-          await supabase.from('positions')
-            .update({ url_id: urlId })
-            .eq('id', currentPos[0].id)
+          await supabase.from('positions').update({ url_id: urlId }).eq('id', currentPos[0].id)
         }
+      }
+
+      // Cannibalisation detection
+      if (urlId && currentPos && currentPos.length > 0 && currentPos[0].url_id && currentPos[0].url_id !== urlId) {
+        await supabase.from('cannibalisation').upsert({
+          keyword_id: kw.id, old_url_id: currentPos[0].url_id, new_url_id: urlId,
+          detected_at: row.date
+        }, { onConflict: 'keyword_id' })
+        cannibalisations++
       }
     } catch { errors++ }
     onProgress(i + 1)
   }
   return { imported, skipped, errors, volumeUpdated, cannibalisations }
+}
+
+// ── Import URLs depuis CSV ─────────────────────────────────────────────────
+async function importUrlsCsv(text: string, projectId: string): Promise<{ imported: number; skipped: number }> {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const urls = lines
+    .map(l => l.split(/[,;\t]/)[0].trim().replace(/^["']+|["']+$/g, ''))
+    .filter(u => u && (u.startsWith('http') || u.startsWith('/')))
+  const unique = [...new Set(urls)]
+  if (!unique.length) return { imported: 0, skipped: 0 }
+
+  // Check existing in unranked_urls
+  const { data: existing } = await supabase.from('unranked_urls').select('url').in('url', unique)
+  const existingSet = new Set((existing ?? []).map(u => u.url))
+  const toInsert = unique.filter(u => !existingSet.has(u))
+
+  if (toInsert.length > 0) {
+    await supabase.from('unranked_urls').insert(toInsert.map(url => ({ url, project_id: projectId, visible: true })))
+  }
+  return { imported: toInsert.length, skipped: unique.length - toInsert.length }
 }
 
 interface Props { onImportDone: () => void }
@@ -285,11 +264,14 @@ export function CsvImporter({ onImportDone }: Props) {
   const [conflict, setConflict] = useState<ConflictInfo | null>(null)
   const [pendingRows, setPendingRows] = useState<ParsedRow[]>([])
   const [isExtended, setIsExtended] = useState(false)
+  const [language, setLanguage] = useState('fr')
+  const [showLang, setShowLang] = useState(false)
+  const [urlImportMsg, setUrlImportMsg] = useState('')
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
     e.target.value = ''
-    setStatus('parsing'); setMessage('Lecture du fichier…'); setConflict(null); setProgress(0)
+    setStatus('parsing'); setMessage('Lecture du fichier…'); setConflict(null); setProgress(0); setUrlImportMsg('')
     try {
       const text = await file.text()
       const { rows, dates, isExtended: ext } = detectAndParseCsv(text)
@@ -299,7 +281,6 @@ export function CsvImporter({ onImportDone }: Props) {
       setMessage(ext
         ? `Export étendu · ${dates.length} dates · ${rows.length} entrées…`
         : `${rows.length} mots-clés pour le ${dates[0]}…`)
-
       const conflictCounts: Record<string, number> = {}
       for (const date of dates) {
         const { count } = await supabase.from('positions').select('id', { count: 'exact', head: true }).eq('date', date).eq('project_id', projectId)
@@ -311,13 +292,25 @@ export function CsvImporter({ onImportDone }: Props) {
         setPendingRows(rows); setStatus('idle'); setMessage(''); return
       }
       await runImport(rows, false)
-    } catch (err: any) { setStatus('error'); setMessage(`Erreur : ${err.message}`); console.error(err) }
+    } catch (err: any) { setStatus('error'); setMessage(`Erreur : ${err.message}`) }
+  }
+
+  async function handleUrlFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = ''
+    setUrlImportMsg('Import URLs…')
+    try {
+      const text = await file.text()
+      const result = await importUrlsCsv(text, projectId ?? '00000000-0000-0000-0000-000000000001')
+      setUrlImportMsg(`✓ ${result.imported} URL${result.imported > 1 ? 's' : ''} ajoutée${result.imported > 1 ? 's' : ''}${result.skipped > 0 ? ` · ${result.skipped} déjà présentes` : ''}`)
+      onImportDone()
+    } catch (err: any) { setUrlImportMsg(`Erreur : ${err.message}`) }
   }
 
   async function runImport(rows: ParsedRow[], overwrite: boolean) {
     setStatus('importing'); setConflict(null); setProgress(0); setTotal(rows.length)
     setMessage(`Import de ${rows.length} entrées…`)
-    const result = await importRows(rows, projectId ?? '00000000-0000-0000-0000-000000000001', overwrite, (n) => {
+    const result = await importRows(rows, projectId ?? '00000000-0000-0000-0000-000000000001', language, overwrite, (n) => {
       setProgress(n); setMessage(`Import… ${n}/${rows.length}`)
     })
     setStatus('done')
@@ -330,85 +323,117 @@ export function CsvImporter({ onImportDone }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-3">
-      <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all"
-        style={status === 'importing'
-          ? {background:'#0d1f1f', color:'#2a5050', cursor:'not-allowed'}
-          : {background:'#317979', color:'#071212'}}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+
+      {/* ── Sélecteur de langue ── */}
+      <div style={{ position: 'relative' }}>
+        <button onClick={() => setShowLang(v => !v)}
+          style={{ padding: '4px 8px', borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: C.surface, border: `1px solid ${C.border}`, color: C.light, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span>{LANGUAGES.find(l => l.code === language)?.code.toUpperCase()}</span>
+          <span style={{ fontSize: 8, color: C.muted }}>▾</span>
+        </button>
+        {showLang && (
+          <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, zIndex: 100, minWidth: 130, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+            {LANGUAGES.map(l => (
+              <button key={l.code} onClick={() => { setLanguage(l.code); setShowLang(false) }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 11, borderRadius: 7, cursor: 'pointer', border: 'none',
+                  background: l.code === language ? `${C.primary}22` : 'transparent',
+                  color: l.code === language ? C.light : C.muted,
+                  fontWeight: l.code === language ? 600 : 400,
+                }}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Import Semrush CSV ── */}
+      <label style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 8,
+        fontSize: 12, fontWeight: 600, cursor: status === 'importing' ? 'not-allowed' : 'pointer',
+        background: status === 'importing' ? C.surface : C.primary, color: C.bg,
+      }}>
         <span>↑</span>
-        {status === 'importing' ? `${progress}/${total}` : 'Importer CSV'}
-        <input type="file" accept=".csv" onChange={handleFile} disabled={status === 'importing'} className="hidden" />
+        {status === 'importing' ? `${progress}/${total}` : 'CSV Semrush'}
+        <input type="file" accept=".csv" onChange={handleFile} disabled={status === 'importing'} style={{ display: 'none' }} />
       </label>
 
-      {/* Format badge — shown after parsing */}
-      {(status === 'checking' || status === 'importing' || status === 'done') && (
-        <span className="text-[9px] px-2 py-0.5 rounded border font-semibold"
-          style={isExtended
-            ? {background:'#1a2a3a', border:'1px solid #317979', color:'#a3f1eb'}
-            : {background:'#1a2a1a', border:'1px solid #2a5050', color:'#4a7a7a'}}>
+      {/* ── Import URLs CSV ── */}
+      <label title="Importer une liste d'URLs (CSV ou TXT, 1 URL par ligne)" style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8,
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        background: C.surface, border: `1px solid ${C.border}`, color: C.muted,
+      }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.light }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted }}>
+        <span>🔗</span> URLs
+        <input type="file" accept=".csv,.txt" onChange={handleUrlFile} style={{ display: 'none' }} />
+      </label>
+
+      {/* ── Messages ── */}
+      {(status === 'checking' || status === 'importing' || status === 'done') && !conflict && (
+        <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+          background: isExtended ? '#1a2a3a' : '#1a2a1a',
+          border: `1px solid ${isExtended ? C.primary : C.muted}`,
+          color: isExtended ? C.light : C.muted }}>
           {isExtended ? '⊞ Multi-dates' : '⊟ Standard'}
         </span>
       )}
-
       {message && !conflict && (
-        <span className="text-xs" style={{
-          color: status === 'done' ? '#4ade80' : status === 'error' ? '#f87171' : '#4a7a7a'
-        }}>
+        <span style={{ fontSize: 11, color: status === 'done' ? '#4ade80' : status === 'error' ? '#f87171' : C.muted }}>
           {message}
         </span>
       )}
+      {urlImportMsg && (
+        <span style={{ fontSize: 11, color: urlImportMsg.startsWith('✓') ? '#4ade80' : urlImportMsg.startsWith('Erreur') ? '#f87171' : C.muted }}>
+          {urlImportMsg}
+        </span>
+      )}
 
+      {/* ── Modale conflit ── */}
       {conflict && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl" style={{background:'#0d1f1f', border:'1px solid #1a3535'}}>
-            <div className="flex items-center gap-2 mb-3">
-              <h2 className="text-base font-semibold" style={{color:'#f6f6f6'}}>Données existantes détectées</h2>
-              <span className="text-[9px] px-2 py-0.5 rounded border font-semibold"
-                style={isExtended
-                  ? {background:'#1a2a3a', border:'1px solid #317979', color:'#a3f1eb'}
-                  : {background:'#1a2a1a', border:'1px solid #2a5050', color:'#4a7a7a'}}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 18, padding: 24, maxWidth: 440, width: '100%', margin: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Données existantes détectées</h2>
+              <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+                background: isExtended ? '#1a2a3a' : '#1a2a1a',
+                border: `1px solid ${isExtended ? C.primary : C.muted}`,
+                color: isExtended ? C.light : C.muted }}>
                 {isExtended ? '⊞ Multi-dates' : '⊟ Standard'}
               </span>
             </div>
-            <p className="text-sm mb-2" style={{color:'#4a7a7a'}}>
+            <p style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
               Des positions existent déjà pour{' '}
-              <span className="font-medium" style={{color:'#f59e0b'}}>{conflict.dates.length} date{conflict.dates.length > 1 ? 's' : ''}</span> :
+              <span style={{ fontWeight: 700, color: '#f59e0b' }}>{conflict.dates.length} date{conflict.dates.length > 1 ? 's' : ''}</span> :
             </p>
-            <ul className="text-xs mb-1 ml-2 max-h-28 overflow-y-auto space-y-0.5">
+            <ul style={{ fontSize: 11, marginBottom: 4, marginLeft: 8, maxHeight: 112, overflowY: 'auto' }}>
               {conflict.dates.map(d => (
-                <li key={d} className="flex justify-between">
-                  <span style={{color:'#a3c4c4'}}>{d}</span>
-                  <span style={{color:'#f59e0b'}}>{conflict.counts[d]} existant{conflict.counts[d] > 1 ? 's' : ''}</span>
+                <li key={d} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ color: '#a3c4c4' }}>{d}</span>
+                  <span style={{ color: '#f59e0b' }}>{conflict.counts[d]} existant{conflict.counts[d] > 1 ? 's' : ''}</span>
                 </li>
               ))}
             </ul>
-            <p className="text-sm mb-5 mt-3" style={{color:'#4a7a7a'}}>
+            <p style={{ fontSize: 13, color: C.muted, marginBottom: 20, marginTop: 12 }}>
               {isExtended
                 ? `${pendingRows.length} entrées sur ${[...new Set(pendingRows.map(r=>r.date))].length} dates à importer.`
                 : `${conflict.rows.length} mots-clés à importer.`}
             </p>
-            <div className="flex flex-col gap-2">
-              <button onClick={() => runImport(pendingRows, true)}
-                className="w-full px-4 py-3 rounded-xl text-sm text-left transition-colors"
-                style={{background:'#317979', color:'#071212'}}
-                onMouseEnter={e=>(e.currentTarget.style.background='#2a6060')}
-                onMouseLeave={e=>(e.currentTarget.style.background='#317979')}>
-                <span className="font-medium">Écraser</span>
-                <span className="block text-xs mt-0.5" style={{color:'#071212', opacity:0.7}}>Remplacer les positions existantes</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => runImport(pendingRows, true)} style={{ padding: '12px 16px', borderRadius: 12, fontSize: 13, textAlign: 'left', cursor: 'pointer', background: C.primary, color: C.bg, border: 'none' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#2a6060')} onMouseLeave={e => (e.currentTarget.style.background = C.primary)}>
+                <span style={{ fontWeight: 700 }}>Écraser</span>
+                <span style={{ display: 'block', fontSize: 11, opacity: 0.7, marginTop: 2 }}>Remplacer les positions existantes</span>
               </button>
-              <button onClick={() => runImport(pendingRows, false)}
-                className="w-full px-4 py-3 rounded-xl text-sm text-left transition-colors"
-                style={{background:'#0d1f1f', border:'1px solid #1a3535', color:'#f6f6f6'}}
-                onMouseEnter={e=>(e.currentTarget.style.background='#1a3535')}
-                onMouseLeave={e=>(e.currentTarget.style.background='#0d1f1f')}>
-                <span className="font-medium">Ignorer les doublons</span>
-                <span className="block text-xs mt-0.5" style={{color:'#4a7a7a'}}>Importer uniquement les nouvelles entrées</span>
+              <button onClick={() => runImport(pendingRows, false)} style={{ padding: '12px 16px', borderRadius: 12, fontSize: 13, textAlign: 'left', cursor: 'pointer', background: C.surface, color: C.text, border: `1px solid ${C.border}` }}
+                onMouseEnter={e => (e.currentTarget.style.background = C.border)} onMouseLeave={e => (e.currentTarget.style.background = C.surface)}>
+                <span style={{ fontWeight: 700 }}>Ignorer les doublons</span>
+                <span style={{ display: 'block', fontSize: 11, color: C.muted, marginTop: 2 }}>Importer uniquement les nouvelles entrées</span>
               </button>
-              <button onClick={() => { setConflict(null); setPendingRows([]) }}
-                className="w-full px-4 py-2 text-sm transition-colors"
-                style={{color:'#4a7a7a'}}
-                onMouseEnter={e=>(e.currentTarget.style.color='#f6f6f6')}
-                onMouseLeave={e=>(e.currentTarget.style.color='#4a7a7a')}>
+              <button onClick={() => { setConflict(null); setPendingRows([]) }} style={{ padding: '8px', fontSize: 12, cursor: 'pointer', background: 'transparent', border: 'none', color: C.muted }}
+                onMouseEnter={e => (e.currentTarget.style.color = C.text)} onMouseLeave={e => (e.currentTarget.style.color = C.muted)}>
                 Annuler
               </button>
             </div>
