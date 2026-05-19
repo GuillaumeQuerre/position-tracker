@@ -20,6 +20,33 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   )
 }
 
+function BulkNewTag({ onCreated }: { onCreated: (name: string, color: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [color, setColor] = useState('#317979')
+  if (!open) return (
+    <button onClick={() => setOpen(true)} className="text-xs px-2 py-1 rounded-md transition-colors flex-shrink-0"
+      style={{background: C.surface, border: `1px solid ${C.border}`, color: C.muted}}>
+      + Nouveau tag
+    </button>
+  )
+  return (
+    <div className="flex items-center gap-1.5 flex-shrink-0">
+      <input type="color" value={color} onChange={e => setColor(e.target.value)}
+        style={{width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', cursor: 'pointer', padding: 1}} />
+      <input value={name} onChange={e => setName(e.target.value)}
+        placeholder="Nom…" autoFocus
+        onKeyDown={e => { if (e.key === 'Enter' && name.trim()) { onCreated(name.trim(), color); setName(''); setOpen(false) } if (e.key === 'Escape') setOpen(false) }}
+        className="rounded px-2 py-1 text-xs focus:outline-none"
+        style={{background: C.surface, border: `1px solid ${C.primary}`, color: C.text, width: 100}} />
+      <button onClick={() => { if (name.trim()) { onCreated(name.trim(), color); setName(''); setOpen(false) } }}
+        disabled={!name.trim()} className="text-xs px-2 py-1 rounded"
+        style={name.trim() ? {background: C.primary, color: C.bg} : {background: C.surface, color: C.dim}}>✓</button>
+      <button onClick={() => setOpen(false)} className="text-xs" style={{color: C.dim}}>✕</button>
+    </div>
+  )
+}
+
 export function KeywordsTab() {
   const { keywords, categories, cannibalisations, loading, toggleStar, addTag, removeTag, createAndAddTag, bulkAddTag, applyRegexTag, deleteCategory } = useKeywordsData()
   const { tabPrefs, setTabPrefs } = useAppStore()
@@ -144,7 +171,7 @@ export function KeywordsTab() {
           Catégories
         </button>
         {cannCount > 0 && (
-          <button onClick={() => { setFilterCannibalised(f => !f); setShowCannibalisations(false) }}
+          <button onClick={() => { setFilterCannibalised(f => !f); setShowCannibalisations(s => !s) }}
             className="px-3 py-2 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5"
             style={filterCannibalised ? {background: '#7f1d1d', borderColor: '#ef4444', color: '#fca5a5'} : {background: C.surface, borderColor: '#7f1d1d', color: '#f87171'}}>
             ⚠ {cannCount} cannibalisés
@@ -155,44 +182,30 @@ export function KeywordsTab() {
       {showRegex && <RegexTagger categories={categories} onApply={applyRegexTag} placeholder="Ex: running|trail|marathon" />}
 
       {/* Cannibalisation panel */}
-      {cannCount > 0 && (
+      {showCannibalisations && cannCount > 0 && (
         <div className="rounded-xl overflow-hidden" style={{border: `1px solid #7f1d1d`}}>
-          <button
-            onClick={() => setShowCannibalisations(s => !s)}
-            className="w-full flex items-center justify-between px-4 py-2.5"
-            style={{background: '#2a0d0d'}}>
-            <div className="flex items-center gap-2">
-              <span style={{color: '#f87171', fontSize: 12}}>⚠</span>
-              <span className="text-xs font-semibold" style={{color: '#fca5a5'}}>
-                Cannibalisations détectées — {cannibalisations.length} entrée{cannibalisations.length > 1 ? 's' : ''}
-              </span>
-            </div>
-            <span className="text-[10px]" style={{color: '#f87171'}}>{showCannibalisations ? '▲' : '▼'}</span>
-          </button>
-          {showCannibalisations && (
-            <div className="overflow-x-auto" style={{background: '#1a0505'}}>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr style={{borderBottom: `1px solid #7f1d1d`}}>
-                    <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Mot-clé</th>
-                    <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Ancienne URL</th>
-                    <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Nouvelle URL</th>
-                    <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Détecté le</th>
+          <div className="overflow-x-auto" style={{background: '#1a0505'}}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{borderBottom: `1px solid #7f1d1d`}}>
+                  <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Mot-clé</th>
+                  <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Ancienne URL</th>
+                  <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Nouvelle URL</th>
+                  <th className="py-2 px-3 text-left font-semibold" style={{color: '#f87171'}}>Détecté le</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cannibalisations.map(c => (
+                  <tr key={c.id} style={{borderBottom: `1px solid #7f1d1d40`}}>
+                    <td className="py-2 px-3 font-medium" style={{color: '#fca5a5'}}>{c.keyword}</td>
+                    <td className="py-2 px-3 truncate max-w-xs" style={{color: '#f87171', opacity: 0.7}}>{c.old_url}</td>
+                    <td className="py-2 px-3 truncate max-w-xs" style={{color: '#fca5a5'}}>{c.new_url}</td>
+                    <td className="py-2 px-3 font-mono" style={{color: '#f87171', opacity: 0.7}}>{c.detected_at}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {cannibalisations.map(c => (
-                    <tr key={c.id} style={{borderBottom: `1px solid #7f1d1d40`}}>
-                      <td className="py-2 px-3 font-medium" style={{color: '#fca5a5'}}>{c.keyword}</td>
-                      <td className="py-2 px-3 truncate max-w-xs" style={{color: '#f87171', opacity: 0.7}}>{c.old_url}</td>
-                      <td className="py-2 px-3 truncate max-w-xs" style={{color: '#fca5a5'}}>{c.new_url}</td>
-                      <td className="py-2 px-3 font-mono" style={{color: '#f87171', opacity: 0.7}}>{c.detected_at}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -240,6 +253,17 @@ export function KeywordsTab() {
             style={bulkCatId ? {background: C.primary, color: C.bg} : {background: C.surface, color: C.dim, cursor:'not-allowed'}}>
             Appliquer
           </button>
+          {/* Créer un nouveau tag et l'appliquer à toute la sélection */}
+          <BulkNewTag onCreated={async (name, color) => {
+            if (selected.length === 0) return
+            // Crée la catégorie via le premier kw (qui fait upsert sur name)
+            await createAndAddTag(selected[0], name, color)
+            // Récupère l'id de la catégorie créée
+            const { data: cat } = await import('../lib/supabase').then(m =>
+              m.supabase.from('keyword_categories').select('id').eq('name', name).maybeSingle()
+            )
+            if (cat?.id && selected.length > 1) await bulkAddTag(selected.slice(1), cat.id)
+          }} />
           <button onClick={() => setSelected([])} className="text-xs transition-colors" style={{color: C.muted}}
             onMouseEnter={e => (e.currentTarget.style.color=C.light)} onMouseLeave={e => (e.currentTarget.style.color=C.muted)}>Annuler</button>
         </div>

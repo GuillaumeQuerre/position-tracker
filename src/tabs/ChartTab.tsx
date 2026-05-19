@@ -700,6 +700,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const [selectedAction, setSelectedAction] = useState<Action | null>(null)
   const [statHover, setStatHover]         = useState<string | null>(null)
   const [lockedStat, setLockedStat]       = useState<string | null>(null)
+  const [detailHovered, setDetailHovered] = useState<string | null>(null)
   const [actionColorMode, setActionColorMode] = useState<'category' | 'owner'>('category')
 
   // ── META (fetched once at mount) — Supabase: 5 queries ────────────────
@@ -836,12 +837,14 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // Only computes a Set — very fast
   const highlightedIds = useMemo(() => {
+    // Survol d'un kw dans le panneau de détail — priorité absolue
+    if (detailHovered) return new Set([detailHovered])
     // Multi-select takes priority
     if (multiSelect.size > 0) return multiSelect
     if (!activeId) return null
     if (viewMode === 'keyword') return new Set([activeId])
     return new Set(groupToKwIds[activeId] ?? [])
-  }, [activeId, multiSelect, viewMode, groupToKwIds])
+  }, [activeId, detailHovered, multiSelect, viewMode, groupToKwIds])
 
   // Stat card hover/lock → highlight matching keywords on chart
   const activeStat = lockedStat ?? statHover
@@ -1598,8 +1601,15 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                 else sorted.sort((a, b) => a.label.localeCompare(b.label, 'fr'))
                 return sorted.map(d => (
                   <div key={d.id} className="flex items-center gap-1 px-1 py-px rounded"
-                    onMouseEnter={e => (e.currentTarget.style.background='#0d1f1f')}
-                    onMouseLeave={e => (e.currentTarget.style.background='transparent')}>
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = '#0d1f1f'
+                      setDetailHovered(d.id)
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = 'transparent'
+                      setDetailHovered(null)
+                    }}>
                     <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
                     <span className="text-[10px] truncate" style={{color:'#a3c4c4'}}>{d.label}</span>
                     <span className="ml-auto flex items-center gap-1 flex-shrink-0">
