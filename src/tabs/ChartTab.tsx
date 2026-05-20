@@ -148,7 +148,8 @@ const BgChart = memo(function BgChart({
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={series} margin={{ top: 30, right: 10, bottom: 10, left: 10 }}>
         <XAxis dataKey="date" tick={<ChartCustomTick />} tickLine={false}
-          axisLine={{ stroke: '#1f2937' }} interval="preserveStartEnd" />
+          axisLine={{ stroke: '#1f2937' }} interval="preserveStartEnd"
+          padding={{ left: 10, right: 20 }} />
         <YAxis reversed domain={[1, 50]} ticks={CHART_Y_TICKS}
           tick={{ fill: '#4a7a7a', fontSize: 10 }}
           tickLine={false} axisLine={false} width={30} />
@@ -258,7 +259,8 @@ const HighlightChart = memo(function HighlightChart({
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={mergedSeries} margin={HL_MARGIN}>
           {/* Transparent axes — pixel-perfect alignment with BgChart */}
-          <XAxis dataKey="date" tick={false} tickLine={false} axisLine={false} />
+          <XAxis dataKey="date" tick={false} tickLine={false} axisLine={false}
+            padding={{ left: 10, right: 20 }} />
           <YAxis reversed domain={[1, 50]} ticks={CHART_Y_TICKS}
             tick={false} tickLine={false} axisLine={false} width={30} />
           {highlightedKeywords.map(kw => (
@@ -296,6 +298,7 @@ const UnifiedMedianChart = memo(function UnifiedMedianChart({
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={medianSeries} margin={{ top: 30, right: 10, bottom: 10, left: 10 }}>
         <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
+          padding={{ left: 10, right: 20 }}
           tickFormatter={d => { try { return format(parseISO(d), 'd MMM', { locale: fr }) } catch { return d } }} />
         <YAxis reversed domain={[1, 50]} tick={{ fill: '#4a7a7a', fontSize: 11 }}
           tickLine={false} axisLine={false} tickCount={5} width={30} />
@@ -911,28 +914,43 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   // Compute action-relative trends (action date → last date) as TrendEntry
   const actionTrendMap = useMemo((): Record<string, TrendEntry> | null => {
     if (!selectedAction || !actionHighlightedIds) return null
+
     const actionRow = rawSeries.find(s => s.date === selectedAction.date)
-    const lastRow = rawSeries[rawSeries.length - 1]
-    if (!actionRow || !lastRow) return null
+    if (!actionRow) return null
+
+    // Utiliser la dernière date du range sélectionné (dateRange.to), pas la fin de rawSeries
+    const endRow = [...rawSeries].filter(s => s.date <= dateRange.to).sort((a, b) => b.date.localeCompare(a.date))[0]
+    if (!endRow) return null
+
+    // Si l'action a eu lieu le même jour que la date de fin → pas d'évolution mesurable
+    const sameDay = actionRow.date === endRow.date
 
     const map: Record<string, TrendEntry> = {}
     for (const kwId of actionHighlightedIds) {
+      // Pas d'évolution mesurable (même jour)
+      if (sameDay) {
+        map[kwId] = {
+          color: TREND_WHITE,
+          first: actionRow[kwId] as number | null,
+          last: actionRow[kwId] as number | null,
+          delta: 0,
+          positionLabel: '–',
+          trend: 'neutral',
+        }
+        continue
+      }
+
       const posAtAction = actionRow[kwId] as number | null
-      const posAtEnd = lastRow[kwId] as number | null
+      const posAtEnd    = endRow[kwId] as number | null
 
       if (posAtAction == null || posAtEnd == null) {
-        // Pas de donnée à la date exacte de l'action — fallback sur la tendance globale (vert/rouge/blanc)
-        const fallback = trendData[kwId]
-        const fallbackColor = fallback?.trend === 'gain' ? TREND_GREEN
-          : fallback?.trend === 'loss' ? TREND_RED
-          : TREND_WHITE
         map[kwId] = {
-          color: fallbackColor,
-          first: posAtAction ?? fallback?.first ?? null,
-          last: posAtEnd ?? fallback?.last ?? null,
-          delta: fallback?.delta ?? 0,
-          positionLabel: fallback?.positionLabel ?? '–',
-          trend: fallback?.trend ?? 'noData'
+          color: TREND_YELLOW,
+          first: posAtAction,
+          last: posAtEnd,
+          delta: 0,
+          positionLabel: '–',
+          trend: 'noData',
         }
         continue
       }
@@ -946,7 +964,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
       }
     }
     return map
-  }, [selectedAction, actionHighlightedIds, rawSeries, trendData])
+  }, [selectedAction, actionHighlightedIds, rawSeries, dateRange.to])
 
   // Series with values nulled before action date (same length, same X axis)
   const actionNulledSeries = useMemo(() => {
@@ -1228,8 +1246,16 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
       return (td?.last != null && td.last >= 100 && td?.first != null && td.first < 100) || (td?.trend === 'noData' && td?.first != null)
     }).length
 
-    return { total: kwList.length, gains, losses, neutrals, noData, stale, urls: urlIds.size, lost, avgDelta }
-  }, [effectiveHighlightedIds, keywords, trendData, actionTrendMap, selectedAction, kwUrlMap])
+    // Détecter si l'action a eu lieu le même jour que la fin du range
+    const actionSameDay = selectedAction
+      ? (() => {
+          const endRow = [...rawSeries].filter(s => s.date <= dateRange.to).sort((a, b) => b.date.localeCompare(a.date))[0]
+          return endRow ? selectedAction.date === endRow.date : false
+        })()
+      : false
+
+    return { total: kwList.length, gains, losses, neutrals, noData, stale, urls: urlIds.size, lost, avgDelta, sameDay: actionSameDay }
+  }, [effectiveHighlightedIds, keywords, trendData, actionTrendMap, selectedAction, kwUrlMap, rawSeries, dateRange.to])
 
   // ── CONSTANTS ────────────────────────────────────────────────────────────
   const VIEW_OPTIONS: { id: ViewMode; label: string }[] = [
@@ -1512,6 +1538,18 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
           </div>
           {selectionDetail ? (
             <div className="tracker-scroll flex-1 overflow-auto px-3 py-2 flex flex-col gap-2.5">
+              {selectionDetail.sameDay ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                  <div style={{ fontSize: 22, color: '#2a5050' }}>—</div>
+                  <p className="text-[10px] leading-relaxed" style={{color:'#2a5050'}}>
+                    Action réalisée aujourd'hui<br/>Aucune évolution mesurable
+                  </p>
+                  <p className="text-[9px]" style={{color:'#1a3535'}}>
+                    {selectionDetail.total} mot{selectionDetail.total > 1 ? 's' : ''}-clé{selectionDetail.total > 1 ? 's' : ''} concerné{selectionDetail.total > 1 ? 's' : ''}
+                  </p>
+                </div>
+              ) : (
+                <>
               <div>
                 <p className="text-[8px] uppercase tracking-widest mb-1.5" style={{color:'#2a5050'}}>Tendances</p>
                 <div className="grid grid-cols-3 gap-1.5">
@@ -1536,6 +1574,8 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                   <StatCard label="hors 50" value={selectionDetail.stale} color={TREND_DARK} />
                 </div>
               </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center">
