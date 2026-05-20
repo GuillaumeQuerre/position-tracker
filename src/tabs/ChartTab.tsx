@@ -176,12 +176,13 @@ const BgChart = memo(function BgChart({
 // Tooltip is updated via direct DOM ref — zero React re-renders on mousemove.
 const HL_MARGIN = { top: 30, right: 10, bottom: 10, left: 10 }
 const HighlightChart = memo(function HighlightChart({
-  series, highlightedKeywords, actionKeywords, actionSeries,
+  series, highlightedKeywords, actionKeywords, actionSeries, hoveredId,
 }: {
   series: any[]
   highlightedKeywords: { id: string; keyword: string; color: string }[]
   actionKeywords: { id: string; keyword: string; color: string }[]
   actionSeries: any[] | null
+  hoveredId?: string | null
 }) {
   const actionIds = useMemo(() => new Set(actionKeywords.map(k => k.id)), [actionKeywords])
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -209,8 +210,8 @@ const HighlightChart = memo(function HighlightChart({
     rafRef.current = requestAnimationFrame(() => {
       const tip = tooltipRef.current; if (!tip) return
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-      const relX = e.clientX - rect.left - HL_MARGIN.left
-      const plotW = rect.width - HL_MARGIN.left - HL_MARGIN.right
+      const relX = e.clientX - rect.left - HL_MARGIN.left - 10 // 10 = xPadLeft
+      const plotW = rect.width - HL_MARGIN.left - HL_MARGIN.right - 10 - 20 // xPadLeft + xPadRight
       if (relX < 0 || relX > plotW) { tip.style.display = 'none'; return }
       const idx = Math.round((relX / plotW) * (mergedSeries.length - 1))
       const row = mergedSeries[Math.max(0, Math.min(idx, mergedSeries.length - 1))]
@@ -265,7 +266,9 @@ const HighlightChart = memo(function HighlightChart({
             tick={false} tickLine={false} axisLine={false} width={30} />
           {highlightedKeywords.map(kw => (
             <Line key={`hl-${kw.id}`} type="monotone" dataKey={kw.id}
-              name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
+              name={kw.keyword} stroke={kw.color}
+              strokeWidth={hoveredId === kw.id ? 3 : 1.5}
+              opacity={hoveredId && hoveredId !== kw.id ? 0.35 : 1}
               connectNulls isAnimationActive={false}
               dot={false} activeDot={false} />
           ))}
@@ -361,10 +364,14 @@ const ActionFlagsOverlay = memo(function ActionFlagsOverlay({
   }, [kwUrlMap])
   const lastRow = series[series.length - 1]
   const marginLeft = 40, marginRight = 10, marginTop = 30, marginBottom = 25
-  const plotW = dims ? dims.w - marginLeft - marginRight : 0
+  // Correspond au padding={{ left: 10, right: 20 }} du XAxis
+  const xPadLeft = 10, xPadRight = 20
+  const plotW = dims ? dims.w - marginLeft - marginRight - xPadLeft - xPadRight : 0
   const plotH = dims ? dims.h - marginTop - marginBottom : 0
   const posToY = (pos: number) => marginTop + ((pos - 1) / 99) * plotH
-  const dateToX = (idx: number) => total > 0 ? marginLeft + (idx / total) * plotW : marginLeft
+  const dateToX = (idx: number) => total > 0
+    ? marginLeft + xPadLeft + (idx / total) * plotW
+    : marginLeft + xPadLeft
 
   function computeImpact(kwIds: string[], row: any) {
     let totalDelta = 0, deltaCount = 0
@@ -865,14 +872,18 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
   // Only computes a Set — very fast
   const highlightedIds = useMemo(() => {
-    // Survol d'un kw dans le panneau de détail — priorité absolue
-    if (detailHovered) return new Set([detailHovered])
+    // Survol d'un kw dans le panneau de détail — priorité absolue, mais on filtre noData
+    if (detailHovered) {
+      const td = trendData[detailHovered]
+      if (td?.trend === 'noData' || td?.trend === 'stale100') return null
+      return new Set([detailHovered])
+    }
     // Multi-select takes priority
     if (multiSelect.size > 0) return multiSelect
     if (!activeId) return null
     if (viewMode === 'keyword') return new Set([activeId])
     return new Set(groupToKwIds[activeId] ?? [])
-  }, [activeId, detailHovered, multiSelect, viewMode, groupToKwIds])
+  }, [activeId, detailHovered, multiSelect, viewMode, groupToKwIds, trendData])
 
   // Stat card hover/lock → highlight matching keywords on chart
   const activeStat = lockedStat ?? statHover
@@ -1446,6 +1457,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                   highlightedKeywords={highlightedKeywords}
                   actionKeywords={actionHighlightedKeywords}
                   actionSeries={actionNulledSeries}
+                  hoveredId={detailHovered}
                 />
               </div>
               <ActionFlagsOverlay
