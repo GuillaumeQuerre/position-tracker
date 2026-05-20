@@ -105,7 +105,7 @@ async function takeSnapshot(): Promise<Snapshot> {
 async function applySegmentation(
   mode: Mode, proposal: Proposal,
   kwMap: Map<string, string>, urlMap: Map<string, string>,
-  projectId: string
+  _projectId: string
 ): Promise<void> {
   if (mode === 'keywords') {
     for (let i = 0; i < proposal.categories.length; i++) {

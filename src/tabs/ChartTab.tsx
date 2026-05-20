@@ -584,9 +584,9 @@ const VolumeChart = memo(function VolumeChart({ data }: { data: { date: string; 
                 color: show(l.key) ? l.color : '#2a5050',
                 opacity: show(l.key) ? 1 : 0.5,
               }}>
-              <span style={{ width: 16, height: 2, background: show(l.key) ? l.color : '#2a5050', borderRadius: 99, display: 'inline-block',
-                borderTop: l.dash ? `2px dashed ${show(l.key) ? l.color : '#2a5050'}` : 'none',
-                background: l.dash ? 'none' : (show(l.key) ? l.color : '#2a5050') }} />
+              <span style={{ width: 16, height: 2, borderRadius: 99, display: 'inline-block',
+                background: l.dash ? 'none' : (show(l.key) ? l.color : '#2a5050'),
+                borderTop: l.dash ? `2px dashed ${show(l.key) ? l.color : '#2a5050'}` : 'none' }} />
               {l.label}
             </button>
           ))}
