@@ -5,11 +5,14 @@
 [build.environment]
   NODE_VERSION = "20"
 
-
 [[edge_functions]]
   path     = "/api/auth"
   function = "auth-proxy"
-  
+
+[[edge_functions]]
+  path     = "/api/invite"
+  function = "invite-proxy"
+
 # SPA redirect — toutes les routes vers index.html
 [[redirects]]
   from = "/*"

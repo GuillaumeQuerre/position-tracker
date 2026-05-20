@@ -58,14 +58,16 @@ function ProjectMembers({
   userRole: Role | null
   isSuperAdmin: boolean
 }) {
-  const [members, setMembers]   = useState<Member[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [newEmail, setNewEmail] = useState('')
-  const [newRole, setNewRole]   = useState<Role>('editor')
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
+  const [members, setMembers]           = useState<Member[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [newEmail, setNewEmail]         = useState('')
+  const [newRole, setNewRole]           = useState<Role>('editor')
+  const [saving, setSaving]             = useState(false)
+  const [error, setError]               = useState('')
+  const [inviteSent, setInviteSent]     = useState<string | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState<Member | null>(null)
 
-  // Admin = créateur du projet OU membre avec rôle admin OU superadmin
+  // Visible pour tous les membres du projet (pas seulement les admins)
   const isCreator = project.owner_email === currentUser.email
   const canManage = isSuperAdmin || isCreator || userRole === 'admin'
 
@@ -80,22 +82,41 @@ function ProjectMembers({
     const email = newEmail.trim().toLowerCase()
     if (!email.includes('@')) return
     if (email === currentUser.email) { setError('Vous êtes déjà sur ce projet'); return }
-    if (members.some(m => m.user_email === email)) { setError('Cet email est déjà membre'); return }
     setSaving(true); setError('')
-    const { error: err } = await supabase.from('project_members').insert({
-      project_id: project.id, user_email: email, role: newRole, invited_by: currentUser.email,
+
+    // 1. Envoyer l'invitation par email
+    const inviteRes = await fetch('/api/invite?action=invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, project_name: project.name, invited_by: currentUser.email, role: newRole }),
     })
+    const inviteData = await inviteRes.json()
+    if (!inviteRes.ok) { setError(inviteData.error || 'Erreur lors de l\'invitation'); setSaving(false); return }
+
+    // 2. Upsert dans project_members (gère le cas où le membre avait déjà été supprimé)
+    const { data: upserted, error: err } = await supabase.from('project_members')
+      .upsert({ project_id: project.id, user_email: email, role: newRole, invited_by: currentUser.email },
+        { onConflict: 'project_id,user_email' })
+      .select().single()
     if (err) { setError(err.message); setSaving(false); return }
-    setMembers(prev => [...prev, {
-      id: crypto.randomUUID(), user_email: email, role: newRole,
-      invited_by: currentUser.email, created_at: new Date().toISOString(),
-    }])
-    setNewEmail(''); setSaving(false)
+
+    // Mettre à jour la liste locale (ajouter ou remplacer)
+    setMembers(prev => {
+      const exists = prev.find(m => m.user_email === email)
+      if (exists) return prev.map(m => m.user_email === email ? { ...m, role: newRole, invited_by: currentUser.email } : m)
+      return [...prev, { id: upserted?.id ?? crypto.randomUUID(), user_email: email, role: newRole, invited_by: currentUser.email, created_at: new Date().toISOString() }]
+    })
+    setNewEmail('')
+    setInviteSent(email)
+    setTimeout(() => setInviteSent(null), 5000)
+    setSaving(false)
   }
 
-  async function removeMember(id: string) {
-    await supabase.from('project_members').delete().eq('id', id)
-    setMembers(prev => prev.filter(m => m.id !== id))
+  async function confirmRemoveMember() {
+    if (!confirmRemove) return
+    await supabase.from('project_members').delete().eq('id', confirmRemove.id)
+    setMembers(prev => prev.filter(m => m.id !== confirmRemove.id))
+    setConfirmRemove(null)
   }
 
   async function changeRole(id: string, role: Role) {
@@ -152,9 +173,7 @@ function ProjectMembers({
                 )}
               </div>
               {canManage ? (
-                <select
-                  value={m.role}
-                  onChange={e => changeRole(m.id, e.target.value as Role)}
+                <select value={m.role} onChange={e => changeRole(m.id, e.target.value as Role)}
                   style={{ fontSize: 11, padding: '4px 8px', background: C.surface, border: `1px solid ${ROLE_COLORS[m.role]}40`, borderRadius: 6, color: ROLE_COLORS[m.role], cursor: 'pointer', outline: 'none' }}>
                   <option value="admin">Administrateur</option>
                   <option value="editor">Éditeur</option>
@@ -164,9 +183,7 @@ function ProjectMembers({
                 <RoleBadge role={m.role} />
               )}
               {canManage && (
-                <button
-                  onClick={() => removeMember(m.id)}
-                  title="Retirer ce membre"
+                <button onClick={() => setConfirmRemove(m)} title="Retirer ce membre"
                   style={{ fontSize: 12, color: C.dim, background: 'none', border: 'none', cursor: 'pointer', padding: '4px', lineHeight: 1, flexShrink: 0 }}
                   onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
                   onMouseLeave={e => (e.currentTarget.style.color = C.dim)}>✕</button>
@@ -182,49 +199,77 @@ function ProjectMembers({
           <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
             Inviter un utilisateur
           </div>
+
           {error && (
             <div style={{ fontSize: 12, color: '#f87171', background: '#2a0d0d', border: '1px solid #7f1d1d', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
               {error}
             </div>
           )}
+
+          {inviteSent && (
+            <div style={{ fontSize: 12, color: '#4ade80', background: '#0d2a1a', border: '1px solid #166534', borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>✓</span>
+              <span>Email d'invitation envoyé à <strong>{inviteSent}</strong></span>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
-              type="email"
-              value={newEmail}
+            <input type="email" value={newEmail}
               onChange={e => { setNewEmail(e.target.value); setError('') }}
               onKeyDown={e => e.key === 'Enter' && addMember()}
               placeholder="email@exemple.com"
               style={{ flex: 1, padding: '8px 12px', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, color: C.text, outline: 'none' }} />
-            <select
-              value={newRole}
-              onChange={e => setNewRole(e.target.value as Role)}
+            <select value={newRole} onChange={e => setNewRole(e.target.value as Role)}
               style={{ padding: '8px 10px', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, color: C.text, cursor: 'pointer', outline: 'none' }}>
               <option value="admin">Administrateur</option>
               <option value="editor">Éditeur</option>
               <option value="reader">Lecteur</option>
             </select>
-            <button
-              onClick={addMember}
-              disabled={saving || !newEmail.includes('@')}
+            <button onClick={addMember} disabled={saving || !newEmail.includes('@')}
               style={{
-                padding: '8px 16px', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: saving || !newEmail.includes('@') ? 'not-allowed' : 'pointer',
+                padding: '8px 16px', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                cursor: saving || !newEmail.includes('@') ? 'not-allowed' : 'pointer',
                 background: saving || !newEmail.includes('@') ? C.dim : C.primary,
                 color: C.bg,
               }}>
-              {saving ? '…' : 'Inviter'}
+              {saving ? '…' : '✉ Inviter'}
             </button>
           </div>
           <div style={{ fontSize: 11, color: C.dim }}>
-            L'utilisateur doit avoir un compte pour accéder au projet.
+            Un email avec un lien de création de compte sera envoyé automatiquement.
           </div>
         </div>
       )}
 
-      {/* Info lecteur/éditeur */}
       {!canManage && (
         <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: C.dim }}>
             Seuls les administrateurs du projet peuvent inviter des membres et modifier les accès.
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmation de suppression */}
+      {confirmRemove && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(7,18,18,0.8)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 28, maxWidth: 400, width: '100%', margin: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 10 }}>Supprimer l'accès</div>
+            <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.65, marginBottom: 20 }}>
+              Voulez-vous supprimer l'accès de <strong style={{ color: C.light }}>{confirmRemove.user_email}</strong> au projet <strong style={{ color: C.light }}>{project.name}</strong> ?
+            </p>
+            <p style={{ fontSize: 11, color: C.dim, marginBottom: 24, padding: '8px 12px', background: C.bg, borderRadius: 8, border: `1px solid ${C.border}` }}>
+              ⚠ Le compte ne sera pas supprimé. L'utilisateur perdra uniquement l'accès à ce projet. Vous pourrez le ré-inviter ultérieurement.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmRemove(null)}
+                style={{ padding: '8px 18px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'transparent', color: C.muted, border: `1px solid ${C.border}` }}>
+                Annuler
+              </button>
+              <button onClick={confirmRemoveMember}
+                style={{ padding: '8px 18px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', background: '#7f1d1d', color: '#fca5a5', border: '1px solid #ef444440' }}>
+                Supprimer l'accès
+              </button>
+            </div>
           </div>
         </div>
       )}

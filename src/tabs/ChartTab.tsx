@@ -111,20 +111,6 @@ const StatCardEvo = memo(function StatCardEvo({
 // Keep legacy Pill/PillEvo as thin wrappers so other usages don't break
 
 
-// ── End dot — renders only at last data point before gap or end ───────────────
-function EndDot({ cx, cy, payload, dataKey, index, series, color }: any) {
-  if (cx == null || cy == null || !payload || payload[dataKey] == null) return null
-  const nextRow = series[index + 1]
-  const isLast = !nextRow || nextRow[dataKey] == null
-  if (!isLast) return null
-  return (
-    <g>
-      <circle cx={cx} cy={cy} r={4} fill={color} stroke="#071212" strokeWidth={2} />
-      <line x1={cx - 3} x2={cx + 3} y1={cy + 7} y2={cy + 7}
-        stroke={color} strokeWidth={1.5} strokeLinecap="round" opacity={0.5} />
-    </g>
-  )
-}
 
 // ── CustomTick: extracted to avoid recreating on every UnifiedChart render ───
 // importDates passed via ref to keep the tick component reference stable
@@ -279,15 +265,13 @@ const HighlightChart = memo(function HighlightChart({
             <Line key={`hl-${kw.id}`} type="monotone" dataKey={kw.id}
               name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
               connectNulls isAnimationActive={false}
-              dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} />}
-              activeDot={false} />
+              dot={false} activeDot={false} />
           ))}
           {actionKeywords.map(kw => (
             <Line key={`act-${kw.id}`} type="monotone" dataKey={`__action__${kw.id}`}
               name={kw.keyword} stroke={kw.color} strokeWidth={1.5} opacity={1}
               connectNulls isAnimationActive={false}
-              dot={(props: any) => <EndDot {...props} series={mergedSeries} color={kw.color} dataKey={`__action__${kw.id}`} />}
-              activeDot={false} />
+              dot={false} activeDot={false} />
           ))}
         </LineChart>
       </ResponsiveContainer>
@@ -552,36 +536,74 @@ function VolumeTooltip({ active, payload, label }: any) {
 const VolumeChart = memo(function VolumeChart({ data }: { data: { date: string; searchVolume: number; traffic: number; potential30?: number }[] }) {
   if (!data.length) return <div className="flex items-center justify-center h-full text-gray-600">Aucune donnée de volume</div>
 
-  // Compute latest score for header badge
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  function toggle(key: string) { setHidden(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n }) }
+  const show = (key: string) => !hidden.has(key)
+
+  // Auto-scale: compute domain from visible series only
+  const yDomain = useMemo(() => {
+    const vals: number[] = []
+    for (const row of data) {
+      if (show('traffic') && row.traffic) vals.push(row.traffic)
+      if (show('potential30') && row.potential30) vals.push(row.potential30)
+      if (show('searchVolume') && row.searchVolume) vals.push(row.searchVolume)
+    }
+    if (!vals.length) return [0, 'auto'] as [number, string]
+    const min = 0
+    const max = Math.ceil(Math.max(...vals) * 1.1)
+    return [min, max] as [number, number]
+  }, [data, hidden])
+
+  // Score badge
   const last = data[data.length - 1]
   const latestScore = last && last.potential30 && last.potential30 > 0
     ? Math.round((last.traffic / last.potential30) * 100) : null
   const scoreColor = scoreToColor(latestScore)
 
+  const LINES = [
+    { key: 'traffic',      label: 'Trafic estimé',  color: '#a3f1eb', strokeWidth: 2.5, dash: undefined,   grad: 'gradTraffic' },
+    { key: 'potential30',  label: 'Objectif 30%',   color: '#f59e0b', strokeWidth: 2,   dash: '6 3',        grad: 'gradPotential30' },
+    { key: 'searchVolume', label: 'Vol. potentiel', color: '#317979', strokeWidth: 1,   dash: '3 5',        grad: 'gradVolume' },
+  ]
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Score badge — top right */}
-      {latestScore != null && (
-        <div style={{ position: 'absolute', top: 4, right: 14, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, background: '#0d1f1f', border: `1px solid ${scoreColor}40`, borderRadius: 8, padding: '4px 10px' }}>
-          <span style={{ fontSize: 9, color: '#4a7a7a' }}>Captation</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: scoreColor, fontFamily: 'monospace' }}>{latestScore}%</span>
-          <span style={{ fontSize: 9, color: '#4a7a7a' }}>de l'objectif</span>
+      {/* Légende interactive — toggle des courbes */}
+      <div style={{ position: 'absolute', top: 4, right: 14, zIndex: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {latestScore != null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#0d1f1f', border: `1px solid ${scoreColor}40`, borderRadius: 7, padding: '3px 9px' }}>
+            <span style={{ fontSize: 9, color: '#4a7a7a' }}>Captation</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: scoreColor, fontFamily: 'monospace' }}>{latestScore}%</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 4, background: '#0d1f1f', border: '1px solid #1a3535', borderRadius: 8, padding: '4px 8px' }}>
+          {LINES.map(l => (
+            <button key={l.key} onClick={() => toggle(l.key)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, padding: '2px 6px', borderRadius: 5, border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                background: show(l.key) ? l.color + '18' : 'transparent',
+                color: show(l.key) ? l.color : '#2a5050',
+                opacity: show(l.key) ? 1 : 0.5,
+              }}>
+              <span style={{ width: 16, height: 2, background: show(l.key) ? l.color : '#2a5050', borderRadius: 99, display: 'inline-block',
+                borderTop: l.dash ? `2px dashed ${show(l.key) ? l.color : '#2a5050'}` : 'none',
+                background: l.dash ? 'none' : (show(l.key) ? l.color : '#2a5050') }} />
+              {l.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
+
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 20, right: 10, bottom: 10, left: 10 }}>
+        <AreaChart data={data} margin={{ top: 28, right: 10, bottom: 10, left: 10 }}>
           <defs>
-            {/* Volume potentiel — très discret, arrière-plan */}
             <linearGradient id="gradVolume" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%"   stopColor="#317979" stopOpacity={0.10} />
               <stop offset="100%" stopColor="#317979" stopOpacity={0.01} />
             </linearGradient>
-            {/* Objectif 30% — amber, visible */}
             <linearGradient id="gradPotential30" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.18} />
               <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.01} />
             </linearGradient>
-            {/* Trafic estimé — teal vif, dominant */}
             <linearGradient id="gradTraffic" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%"   stopColor="#a3f1eb" stopOpacity={0.45} />
               <stop offset="100%" stopColor="#a3f1eb" stopOpacity={0.03} />
@@ -589,21 +611,24 @@ const VolumeChart = memo(function VolumeChart({ data }: { data: { date: string; 
           </defs>
           <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
             tickFormatter={d => { try { return format(parseISO(d), 'd MMM', { locale: fr }) } catch { return d } }} />
-          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} width={50}
+          <YAxis domain={yDomain} tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} width={50}
             tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`} />
           <Tooltip content={<VolumeTooltip />} cursor={{ stroke: '#1a3535', strokeWidth: 1 }} />
-          {/* Volume potentiel — fond discret, tracé fin */}
-          <Area type="monotone" dataKey="searchVolume" name="Vol. potentiel"
-            stroke="#317979" strokeWidth={1} strokeDasharray="3 5" fill="url(#gradVolume)"
-            isAnimationActive={false} />
-          {/* Objectif 30% — cible amber, pointillés épais */}
-          <Area type="monotone" dataKey="potential30" name="Objectif 30%"
-            stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" fill="url(#gradPotential30)"
-            isAnimationActive={false} />
-          {/* Trafic estimé — réalité, courbe dominante */}
-          <Area type="monotone" dataKey="traffic" name="Trafic estimé"
-            stroke="#a3f1eb" strokeWidth={2.5} fill="url(#gradTraffic)"
-            isAnimationActive={false} />
+          {show('searchVolume') && (
+            <Area type="monotone" dataKey="searchVolume" name="Vol. potentiel"
+              stroke="#317979" strokeWidth={1} strokeDasharray="3 5" fill="url(#gradVolume)"
+              isAnimationActive={false} />
+          )}
+          {show('potential30') && (
+            <Area type="monotone" dataKey="potential30" name="Objectif 30%"
+              stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" fill="url(#gradPotential30)"
+              isAnimationActive={false} />
+          )}
+          {show('traffic') && (
+            <Area type="monotone" dataKey="traffic" name="Trafic estimé"
+              stroke="#a3f1eb" strokeWidth={2.5} fill="url(#gradTraffic)"
+              isAnimationActive={false} />
+          )}
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -1179,8 +1204,12 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
     let gains = 0, losses = 0, neutrals = 0, noData = 0, stale = 0
     const urlIds = new Set<string>()
 
+    // Si une action est sélectionnée, utiliser actionTrendMap (calculé depuis la date d'action)
+    // Sinon utiliser trendData (calculé sur la période entière)
+    const tmap = (selectedAction && actionTrendMap) ? actionTrendMap : trendData
+
     for (const kw of kwList) {
-      const td = trendData[kw.id]
+      const td = tmap[kw.id]
       if (td?.trend === 'gain') gains++
       else if (td?.trend === 'loss') losses++
       else if (td?.trend === 'neutral') neutrals++
@@ -1190,24 +1219,17 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
       if (uid) urlIds.add(uid)
     }
 
-    // Exclude keywords outside top 50 from delta avg
     const realDeltas = kwList
-      .filter(k => { const td = trendData[k.id]; return td && td.last != null && td.last < 100 && td.delta !== 0 })
-      .map(k => trendData[k.id]!.delta)
+      .filter(k => { const td = tmap[k.id]; return td && td.last != null && td.last < 100 && td.delta !== 0 })
+      .map(k => tmap[k.id]!.delta)
     const avgDelta = realDeltas.length ? Math.round(realDeltas.reduce((a, b) => a + b, 0) / realDeltas.length * 10) / 10 : 0
     const lost = kwList.filter(k => {
-      const td = trendData[k.id]
+      const td = tmap[k.id]
       return (td?.last != null && td.last >= 100 && td?.first != null && td.first < 100) || (td?.trend === 'noData' && td?.first != null)
     }).length
 
-    return {
-      total: kwList.length,
-      gains, losses, neutrals, noData, stale,
-      urls: urlIds.size,
-      lost,
-      avgDelta,
-    }
-  }, [effectiveHighlightedIds, keywords, trendData, kwUrlMap])
+    return { total: kwList.length, gains, losses, neutrals, noData, stale, urls: urlIds.size, lost, avgDelta }
+  }, [effectiveHighlightedIds, keywords, trendData, actionTrendMap, selectedAction, kwUrlMap])
 
   // ── CONSTANTS ────────────────────────────────────────────────────────────
   const VIEW_OPTIONS: { id: ViewMode; label: string }[] = [

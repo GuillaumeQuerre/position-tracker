@@ -8,31 +8,31 @@ import { CsvImporter } from './components/CsvImporter'
 import { Onboarding }  from './components/Onboarding'
 import { ProjectSelector } from './components/ProjectSelector'
 import { LoginPage }   from './components/LoginPage'
-import { ManageTab }  from './tabs/ManageTab'
+import { InvitePage }  from './components/InvitePage'
+import { ManageTab }   from './tabs/ManageTab'
 import { useAuth }     from './hooks/useAuth'
 import { useAppStore } from './store/useAppStore'
-import { supabase } from './lib/supabase'
+import { supabase }    from './lib/supabase'
 
 const ActionsTabWrapper = ActionsTab as React.ComponentType<{ preselectedUrls?: string[] }>
 
 type Tab = 'chart' | 'keywords' | 'urls' | 'actions' | 'journal' | 'account'
 
-const TABS: { id: Tab; label: string; icon: string; hideForReader?: boolean }[] = [
-  { id: 'chart',    label: 'Graphique',  icon: '📈' },
-  { id: 'keywords', label: 'Mots-clés',  icon: '🔑' },
-  { id: 'urls',     label: 'URLs',       icon: '🔗' },
-  { id: 'actions',  label: 'Actions',    icon: '⚡' },
-  { id: 'journal',  label: 'Journal',    icon: '📋' },
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'chart',    label: 'Graphique', icon: '📈' },
+  { id: 'keywords', label: 'Mots-clés', icon: '🔑' },
+  { id: 'urls',     label: 'URLs',      icon: '🔗' },
+  { id: 'actions',  label: 'Actions',   icon: '⚡' },
+  { id: 'journal',  label: 'Journal',   icon: '📋' },
 ]
 
 const ONBOARDING_KEY = 'position-tracker-onboarding-done'
 
-// Handle /reset-password in hash URL
+// ── Détecte un token de réinitialisation de mot de passe dans le hash ────────
 function useResetPasswordFlow() {
   const [resetToken, setResetToken] = useState<string | null>(null)
   useEffect(() => {
-    const hash = window.location.hash
-    const params = new URLSearchParams(hash.replace(/^#/, ''))
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
     const t = params.get('access_token')
     const type = params.get('type')
     if (t && type === 'recovery') {
@@ -43,21 +43,28 @@ function useResetPasswordFlow() {
   return resetToken
 }
 
+// ── Détecte un token d'invitation dans le hash ────────────────────────────────
+function useInviteFlow() {
+  const [inviteToken, setInviteToken] = useState<string | null>(null)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const t = params.get('access_token')
+    const type = params.get('type')
+    if (t && (type === 'invite' || type === 'signup')) {
+      setInviteToken(t)
+      // InvitePage nettoie l'URL elle-même
+    }
+  }, [])
+  return inviteToken
+}
+
 export default function App() {
   const { user, loading: authLoading, error: authError, isSuperAdmin, login, signup, logout, forgotPassword, resetPassword, updateDisplayName } = useAuth()
   const { projectId } = useAppStore()
-  const resetToken = useResetPasswordFlow()
+  const resetToken  = useResetPasswordFlow()
+  const inviteToken = useInviteFlow()
+
   const [projects, setProjects] = useState<{ id: string; name: string; owner_email: string | null }[]>([])
-
-useEffect(() => {
-  if (!user) { setProjects([]); return }
-  supabase
-    .from('projects')
-    .select('id, name, owner_email')
-    .order('created_at')
-    .then(({ data }) => setProjects(data ?? []))
-}, [user])
-
   const [activeTab, setActiveTab] = useState<Tab>('chart')
   const [refreshKey, setRefreshKey] = useState(0)
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -66,6 +73,12 @@ useEffect(() => {
   const [resetPwd, setResetPwd] = useState('')
   const [resetConfirm, setResetConfirm] = useState('')
   const [resetError, setResetError] = useState('')
+
+  useEffect(() => {
+    if (!user) { setProjects([]); return }
+    supabase.from('projects').select('id, name, owner_email').order('created_at')
+      .then(({ data }) => setProjects(data ?? []))
+  }, [user])
 
   useEffect(() => {
     try { if (!window.localStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true) } catch {}
@@ -82,7 +95,7 @@ useEffect(() => {
 
   useEffect(() => { if (activeTab !== 'actions') setPreselectedActionUrls([]) }, [activeTab])
 
-  // Keyboard shortcuts
+  // Raccourcis clavier 1-5
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName
@@ -95,7 +108,12 @@ useEffect(() => {
     return () => window.removeEventListener('keydown', handleKey)
   }, [])
 
-  // ── Reset password flow ──────────────────────────────────────
+  // ── Invitation — définition du mot de passe ──────────────────────────────
+  if (inviteToken) {
+    return <InvitePage onDone={() => window.location.href = '/'} />
+  }
+
+  // ── Réinitialisation du mot de passe ─────────────────────────────────────
   if (resetToken && resetStatus !== 'success') {
     return (
       <div style={{ minHeight: '100vh', background: '#071212', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -127,7 +145,7 @@ useEffect(() => {
         <div style={{ textAlign: 'center', color: '#a3f1eb' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Mot de passe mis à jour !</div>
-          <button onClick={() => { setResetStatus('idle') }} style={{ marginTop: 12, padding: '8px 20px', background: '#317979', color: '#071212', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          <button onClick={() => setResetStatus('idle')} style={{ marginTop: 12, padding: '8px 20px', background: '#317979', color: '#071212', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
             Se connecter →
           </button>
         </div>
@@ -135,12 +153,12 @@ useEffect(() => {
     )
   }
 
-  // ── Not authenticated ────────────────────────────────────────
+  // ── Non authentifié ──────────────────────────────────────────────────────
   if (!user) {
     return <LoginPage onLogin={login} onSignup={signup} onForgotPassword={forgotPassword} loading={authLoading} error={authError} />
   }
 
-  // ── Authenticated ────────────────────────────────────────────
+  // ── App principale ───────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#060e1a] text-gray-100">
       {showOnboarding && <Onboarding onFinish={handleOnboardingFinish} />}
@@ -164,7 +182,7 @@ useEffect(() => {
           <button onClick={() => setShowOnboarding(true)}
             className="text-gray-600 hover:text-gray-400 text-xs px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Guide">?</button>
 
-          {/* User avatar / account */}
+          {/* Bouton compte */}
           <button onClick={() => setActiveTab('account')}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-all ${activeTab === 'account' ? 'bg-[#317979] text-[#071212]' : 'text-gray-400 hover:text-gray-200 hover:bg-[#0f1a2e]'}`}>
             <span style={{ fontSize: 14 }}>👤</span>
@@ -183,8 +201,14 @@ useEffect(() => {
         <div style={{ display: activeTab === 'actions'  ? 'block' : 'none' }}><ActionsTabWrapper key={refreshKey} preselectedUrls={preselectedActionUrls} /></div>
         <div style={{ display: activeTab === 'journal'  ? 'block' : 'none' }}><JournalTab key={refreshKey} /></div>
         {activeTab === 'account' && (
-          <ManageTab user={user} projects={projects}
-    currentProjectId={projectId ?? null} onLogout={logout} updateDisplayName={updateDisplayName} isSuperAdmin={isSuperAdmin} />
+          <ManageTab
+            user={user}
+            projects={projects}
+            currentProjectId={projectId ?? null}
+            onLogout={logout}
+            updateDisplayName={updateDisplayName}
+            isSuperAdmin={isSuperAdmin}
+          />
         )}
       </main>
     </div>
