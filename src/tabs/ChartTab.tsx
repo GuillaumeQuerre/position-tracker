@@ -406,36 +406,58 @@ const ActionFlagsOverlay = memo(function ActionFlagsOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions, dates, series, dims, kwUrlMap, allKwIds, dateIndex, urlToKwIds])
 
+  // Grouper les actions globales par date pour empiler les labels
+  const globalByDate = useMemo(() => {
+    const m = new Map<number, typeof enrichedGlobal>()
+    for (const e of enrichedGlobal) {
+      const x = Math.round(e.x)
+      if (!m.has(x)) m.set(x, [])
+      m.get(x)!.push(e)
+    }
+    return m
+  }, [enrichedGlobal])
+
   return (
     <div ref={containerRef} className="absolute inset-0 pointer-events-none">
       {dims && (<>
-        {/* Global actions — thin dashed vertical line + small label above */}
-        {enrichedGlobal.map(({ action, categoryColor, impactColor, x }) => {
-          const isSel = selectedActionId === action.id
-          const c = isSel ? impactColor : categoryColor
+        {/* Global actions — empilées si même date */}
+        {[...globalByDate.entries()].map(([, group]) => {
+          // Ligne verticale commune (couleur de la première action ou de la sélectionnée)
+          const selInGroup = group.find(e => selectedActionId === e.action.id)
+          const representative = selInGroup ?? group[0]
+          const x = representative.x
+          const lineColor = selInGroup ? selInGroup.impactColor : representative.categoryColor
+
           return (
-            <div key={action.id} className="absolute" style={{ left: x, top: 0, height: '100%', transform: 'translateX(-50%)', zIndex: isSel ? 10 : 3, pointerEvents: 'none' }}>
-              {/* vertical line through full plot */}
+            <div key={group.map(e => e.action.id).join('-')} className="absolute" style={{ left: x, top: 0, height: '100%', transform: 'translateX(-50%)', zIndex: selInGroup ? 10 : 3, pointerEvents: 'none' }}>
+              {/* Ligne verticale */}
               <div className="absolute" style={{
                 left: '50%', top: marginTop, height: plotH,
                 width: 1, transform: 'translateX(-50%)',
-                background: `linear-gradient(to bottom, ${c}99 0%, ${c}33 70%, transparent 100%)`,
+                background: `linear-gradient(to bottom, ${lineColor}99 0%, ${lineColor}33 70%, transparent 100%)`,
               }} />
-              {/* label pill above plot */}
-              <button onClick={(e) => { e.stopPropagation(); onClickAction(isSel ? null : action) }}
-                className="absolute flex items-center gap-1 whitespace-nowrap"
-                style={{
-                  pointerEvents: 'auto',
-                  top: marginTop - 20, left: '50%', transform: 'translateX(-50%)',
-                  padding: '1px 5px 1px 3px', borderRadius: 3,
-                  background: isSel ? `${c}22` : 'transparent',
-                  border: `1px solid ${c}${isSel ? '66' : '44'}`,
-                  color: c, fontSize: 8, fontWeight: isSel ? 700 : 500, letterSpacing: '0.02em',
-                  opacity: isSel ? 1 : 0.75,
-                }}>
-                <span style={{ width: 4, height: 4, borderRadius: '50%', background: c, flexShrink: 0, display: 'inline-block' }} />
-                {action.name.length > 16 ? action.name.slice(0, 15) + '…' : action.name}
-              </button>
+              {/* Labels empilés — 1 par action à cette date */}
+              {group.map((e, gi) => {
+                const isSel = selectedActionId === e.action.id
+                const c = isSel ? e.impactColor : e.categoryColor
+                const topOffset = marginTop - 20 - gi * 18 // 18px par label
+                return (
+                  <button key={e.action.id} onClick={(ev) => { ev.stopPropagation(); onClickAction(isSel ? null : e.action) }}
+                    className="absolute flex items-center gap-1 whitespace-nowrap"
+                    style={{
+                      pointerEvents: 'auto',
+                      top: topOffset, left: '50%', transform: 'translateX(-50%)',
+                      padding: '1px 5px 1px 3px', borderRadius: 3,
+                      background: isSel ? `${c}22` : 'transparent',
+                      border: `1px solid ${c}${isSel ? '66' : '44'}`,
+                      color: c, fontSize: 8, fontWeight: isSel ? 700 : 500, letterSpacing: '0.02em',
+                      opacity: isSel ? 1 : 0.75,
+                    }}>
+                    <span style={{ width: 4, height: 4, borderRadius: '50%', background: c, flexShrink: 0, display: 'inline-block' }} />
+                    {e.action.name.length > 16 ? e.action.name.slice(0, 15) + '…' : e.action.name}
+                  </button>
+                )
+              })}
             </div>
           )
         })}
@@ -1007,8 +1029,13 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const highlightedKeywords = useMemo(() => {
     if (!nonActionHighlightedIds) return []
     return keywords
-      .filter(k => nonActionHighlightedIds.has(k.id) && trendData[k.id]?.trend !== 'noData')
-      .map(k => ({ id: k.id, keyword: k.keyword, color: trendData[k.id]?.color ?? TREND_WHITE }))
+      .filter(k => nonActionHighlightedIds.has(k.id) && trendData[k.id]?.trend !== 'stale100')
+      .map(k => {
+        const td = trendData[k.id]
+        // noData ou pas de position fin → blanc (courbe présente mais non colorée)
+        const color = (!td || td.trend === 'noData') ? TREND_WHITE : td.color
+        return { id: k.id, keyword: k.keyword, color }
+      })
   }, [nonActionHighlightedIds, keywords, trendData])
 
   // effectiveHighlightedIds for detail panel (includes all sources)
