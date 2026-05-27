@@ -759,6 +759,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const [lockedStat, setLockedStat]       = useState<string | null>(null)
   const [detailHovered, setDetailHovered] = useState<string | null>(null)
   const [actionColorMode, setActionColorMode] = useState<'category' | 'owner'>('category')
+  const [hoveredUrlId, setHoveredUrlId]       = useState<string | null>(null)
 
   // ── META (fetched once at mount) — Supabase: 5 queries ────────────────
   const [kwCategories, setKwCategories]   = useState<(BaseMeta & { source: 'imported'|'manual' })[]>([])
@@ -1717,7 +1718,6 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
               .filter(e => e.td && e.td.trend !== 'noData' && (e.td.last == null || e.td.last < 100))
               .sort((a, b) => (b.td?.delta ?? 0) - (a.td?.delta ?? 0))
 
-            const [hoveredUrlId, setHoveredUrlId] = React.useState<string | null>(null)
             const filteredKws = hoveredUrlId
               ? kwEntries.filter(e => (kwUrlMap[e.kwId] ?? '__none__') === hoveredUrlId)
               : kwEntries
