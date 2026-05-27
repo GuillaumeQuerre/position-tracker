@@ -760,6 +760,10 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
   const [detailHovered, setDetailHovered] = useState<string | null>(null)
   const [actionColorMode, setActionColorMode] = useState<'category' | 'owner'>('category')
   const [hoveredUrlId, setHoveredUrlId]       = useState<string | null>(null)
+  const [actionUrlSort, setActionUrlSort]     = useState<'gain' | 'loss' | 'delta' | 'kwCount'>('gain')
+  const [actionUrlSortAsc, setActionUrlSortAsc] = useState(false)
+  const [actionKwSort, setActionKwSort]       = useState<'alpha' | 'volume' | 'start' | 'end' | 'delta'>('delta')
+  const [actionKwSortAsc, setActionKwSortAsc] = useState(false)
 
   // ── META (fetched once at mount) — Supabase: 5 queries ────────────────
   const [kwCategories, setKwCategories]   = useState<(BaseMeta & { source: 'imported'|'manual' })[]>([])
@@ -1706,9 +1710,24 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                 avgDelta: stats.deltaCount > 0 ? Math.round(stats.totalDelta / stats.deltaCount * 10) / 10 : 0,
                 ...stats,
               }))
-              .sort((a, b) => b.gain - a.gain)
+              .map(([urlId, stats]) => ({
+                urlId,
+                url: urlId === '__none__' ? '(sans URL)' : (urlMeta.find(u => u.id === urlId)?.label ?? urlId),
+                avgDelta: stats.deltaCount > 0 ? Math.round(stats.totalDelta / stats.deltaCount * 10) / 10 : 0,
+                total: stats.kwIds.length,
+                ...stats,
+              }))
 
-            // Liste des kw avec détail : volume / pos début / pos fin / delta
+            // Tri URLs
+            const sortedUrlEntries = [...urlEntries].sort((a, b) => {
+              const mul = actionUrlSortAsc ? 1 : -1
+              if (actionUrlSort === 'gain')    return mul * (a.gain - b.gain)
+              if (actionUrlSort === 'loss')    return mul * (a.loss - b.loss)
+              if (actionUrlSort === 'delta')   return mul * (a.avgDelta - b.avgDelta)
+              return mul * (a.total - b.total)
+            })
+
+            // Tri KWs
             const kwEntries = [...actionHighlightedIds]
               .map(kwId => {
                 const kw = keywords.find(k => k.id === kwId)
@@ -1716,95 +1735,99 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                 return { kwId, label: kw?.keyword ?? kwId, volume: volumeMap[kwId] ?? null, td }
               })
               .filter(e => e.td && e.td.trend !== 'noData' && (e.td.last == null || e.td.last < 100))
-              .sort((a, b) => (b.td?.delta ?? 0) - (a.td?.delta ?? 0))
 
             const filteredKws = hoveredUrlId
               ? kwEntries.filter(e => (kwUrlMap[e.kwId] ?? '__none__') === hoveredUrlId)
               : kwEntries
 
+            const sortedKws = [...filteredKws].sort((a, b) => {
+              const mul = actionKwSortAsc ? 1 : -1
+              if (actionKwSort === 'alpha')  return mul * a.label.localeCompare(b.label, 'fr')
+              if (actionKwSort === 'volume') return mul * ((a.volume ?? -1) - (b.volume ?? -1))
+              if (actionKwSort === 'start')  return mul * ((a.td?.first ?? 999) - (b.td?.first ?? 999))
+              if (actionKwSort === 'end')    return mul * ((a.td?.last ?? 999) - (b.td?.last ?? 999))
+              return mul * ((a.td?.delta ?? 0) - (b.td?.delta ?? 0))
+            })
+
+            function SortHdr({ label, col, isUrl, right }: { label: string; col: string; isUrl?: boolean; right?: boolean }) {
+              const active = isUrl ? actionUrlSort === col : actionKwSort === col
+              const asc = isUrl ? actionUrlSortAsc : actionKwSortAsc
+              return (
+                <span onClick={() => {
+                  if (isUrl) { if (active) setActionUrlSortAsc(v => !v); else { setActionUrlSort(col as any); setActionUrlSortAsc(false) } }
+                  else { if (active) setActionKwSortAsc(v => !v); else { setActionKwSort(col as any); setActionKwSortAsc(false) } }
+                }} style={{ fontSize: 7, fontWeight: 700, color: active ? '#a3f1eb' : '#2a5050', textTransform: 'uppercase' as const, letterSpacing: '0.05em', cursor: 'pointer', userSelect: 'none' as const, textAlign: right ? 'right' as const : 'left' as const, display: 'block' }}>
+                  {label}{active ? (asc ? '↑' : '↓') : ''}
+                </span>
+              )
+            }
+
             return (
-              <div className="border-t flex-shrink-0" style={{ borderColor:'#1a3535', borderTop: `1px solid #1a3535`, marginTop: 4 }}>
+              <div className="border-t flex-shrink-0" style={{ borderTop: `1px solid #1a3535`, marginTop: 4 }}>
                 <div className="flex items-center justify-between px-1 py-1">
-                  <span style={{ fontSize: 9, fontWeight: 700, color: C_PRIMARY, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                    {selectedAction.name}
-                  </span>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: C_PRIMARY, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{selectedAction.name}</span>
                   <button onClick={() => setSelectedAction(null)} style={{ fontSize: 11, color: '#4a7a7a', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
                 </div>
                 <div style={{ display: 'flex', gap: 6, height: 160, overflow: 'hidden' }}>
 
                   {/* Colonne 1 — URLs */}
-                  <div className="tracker-scroll" style={{ flex: '0 0 44%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <div style={{ fontSize: 8, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2, padding: '0 4px' }}>URLs</div>
-                    {urlEntries.map(e => {
+                  <div className="tracker-scroll" style={{ flex: '0 0 42%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 22px 22px 22px 28px', gap: 2, padding: '2px 6px 4px', borderBottom: '1px solid #1a3535', marginBottom: 2 }}>
+                      <SortHdr label="URL" col="kwCount" isUrl />
+                      <SortHdr label="↑" col="gain" isUrl />
+                      <SortHdr label="↓" col="loss" isUrl />
+                      <SortHdr label="#" col="kwCount" isUrl right />
+                      <SortHdr label="Δmoy" col="delta" isUrl right />
+                    </div>
+                    {sortedUrlEntries.map(e => {
                       const isHov = hoveredUrlId === e.urlId
-                      const deltaColor = e.avgDelta > 0 ? '#317979' : e.avgDelta < 0 ? '#ef4444' : '#4a7a7a'
+                      const dc = e.avgDelta > 0 ? '#317979' : e.avgDelta < 0 ? '#ef4444' : '#4a7a7a'
                       return (
-                        <div key={e.urlId}
-                          onMouseEnter={() => setHoveredUrlId(e.urlId)}
-                          onMouseLeave={() => setHoveredUrlId(null)}
-                          style={{
-                            padding: '5px 6px', borderRadius: 7, cursor: 'pointer', transition: 'background 0.1s',
-                            background: isHov ? '#0d1f1f' : 'transparent',
-                            border: `1px solid ${isHov ? '#1a3535' : 'transparent'}`,
-                          }}>
-                          <div style={{ fontSize: 9, color: isHov ? '#a3f1eb' : '#a3c4c4', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div key={e.urlId} onMouseEnter={() => setHoveredUrlId(e.urlId)} onMouseLeave={() => setHoveredUrlId(null)}
+                          style={{ padding: '4px 6px', borderRadius: 6, cursor: 'pointer', background: isHov ? '#0d1f1f' : 'transparent', border: `1px solid ${isHov ? '#1a3535' : 'transparent'}` }}>
+                          <div style={{ fontSize: 9, color: isHov ? '#a3f1eb' : '#a3c4c4', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {e.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
                           </div>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            {e.gain    > 0 && <span style={{ fontSize: 9, fontWeight: 700, color: '#317979', fontFamily: 'monospace' }}>↑{e.gain}</span>}
-                            {e.loss    > 0 && <span style={{ fontSize: 9, fontWeight: 700, color: '#ef4444', fontFamily: 'monospace' }}>↓{e.loss}</span>}
-                            {e.neutral > 0 && <span style={{ fontSize: 9, color: '#4a7a7a', fontFamily: 'monospace' }}>={e.neutral}</span>}
-                            {e.lost    > 0 && <span style={{ fontSize: 9, color: '#f87171', fontFamily: 'monospace' }}>✕{e.lost}</span>}
-                            {e.noData  > 0 && <span style={{ fontSize: 9, color: '#2a5050', fontFamily: 'monospace' }}>—{e.noData}</span>}
-                            {e.deltaCount > 0 && (
-                              <span style={{ fontSize: 8, fontFamily: 'monospace', marginLeft: 'auto', color: deltaColor, fontWeight: 600 }}>
-                                {e.avgDelta > 0 ? '+' : ''}{e.avgDelta}
-                              </span>
-                            )}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 22px 22px 22px 28px', gap: 2 }}>
+                            <span />
+                            <span style={{ fontSize: 8, fontWeight: 700, color: '#317979', fontFamily: 'monospace', textAlign: 'center' }}>{e.gain > 0 ? e.gain : '·'}</span>
+                            <span style={{ fontSize: 8, fontWeight: 700, color: '#ef4444', fontFamily: 'monospace', textAlign: 'center' }}>{e.loss > 0 ? e.loss : '·'}</span>
+                            <span style={{ fontSize: 8, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'center' }}>{e.total}</span>
+                            <span style={{ fontSize: 8, fontWeight: 600, color: dc, fontFamily: 'monospace', textAlign: 'right' }}>{e.deltaCount > 0 ? `${e.avgDelta > 0 ? '+' : ''}${e.avgDelta}` : '—'}</span>
                           </div>
                         </div>
                       )
                     })}
                   </div>
 
-                  {/* Séparateur */}
                   <div style={{ width: 1, background: '#1a3535', flexShrink: 0, margin: '16px 0 4px' }} />
 
                   {/* Colonne 2 — Mots-clés */}
                   <div className="tracker-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: 8, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2, padding: '0 2px' }}>
-                      Mots-clés {hoveredUrlId ? <span style={{ color: '#317979' }}>· filtrés</span> : null}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 30px 28px 28px 26px', gap: 2, padding: '2px 4px 4px', borderBottom: '1px solid #1a3535', marginBottom: 2 }}>
+                      <SortHdr label="Mot-clé" col="alpha" />
+                      <SortHdr label="Vol." col="volume" right />
+                      <SortHdr label="Déb." col="start" right />
+                      <SortHdr label="Fin" col="end" right />
+                      <SortHdr label="Δ" col="delta" right />
                     </div>
-                    {/* Header */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 36px 32px 32px 28px', gap: 2, padding: '2px 4px', marginBottom: 2 }}>
-                      {['Mot-clé', 'Vol.', 'Déb.', 'Fin', 'Δ'].map(h => (
-                        <span key={h} style={{ fontSize: 7, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: h !== 'Mot-clé' ? 'right' : 'left' }}>{h}</span>
-                      ))}
-                    </div>
-                    {filteredKws.length === 0 && (
-                      <div style={{ fontSize: 10, color: '#2a5050', padding: '8px 4px', fontStyle: 'italic' }}>Aucun mot-clé avec données</div>
-                    )}
-                    {filteredKws.map(e => {
+                    {sortedKws.length === 0 && <div style={{ fontSize: 10, color: '#2a5050', padding: '8px 4px', fontStyle: 'italic' }}>Aucun mot-clé</div>}
+                    {sortedKws.map(e => {
                       const td = e.td!
-                      const deltaColor = td.delta > 0 ? '#317979' : td.delta < 0 ? '#ef4444' : '#4a7a7a'
-                      const kwColor = td.trend === 'gain' ? '#317979' : td.trend === 'loss' ? '#ef4444' : '#f6f6f6'
+                      const dc = td.delta > 0 ? '#317979' : td.delta < 0 ? '#ef4444' : '#4a7a7a'
+                      const kc = td.trend === 'gain' ? '#317979' : td.trend === 'loss' ? '#ef4444' : '#f6f6f6'
                       return (
-                        <div key={e.kwId}
-                          style={{ display: 'grid', gridTemplateColumns: '1fr 36px 32px 32px 28px', gap: 2, padding: '3px 4px', borderRadius: 5, cursor: 'pointer' }}
+                        <div key={e.kwId} style={{ display: 'grid', gridTemplateColumns: '1fr 30px 28px 28px 26px', gap: 2, padding: '3px 4px', borderRadius: 5, cursor: 'pointer' }}
                           onMouseEnter={ev => { ev.currentTarget.style.background = '#0d1f1f'; setDetailHovered(e.kwId) }}
                           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent'; setDetailHovered(null) }}>
                           <span style={{ fontSize: 9, color: '#a3c4c4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: kwColor, flexShrink: 0, display: 'inline-block' }} />
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: kc, flexShrink: 0, display: 'inline-block' }} />
                             {e.label}
                           </span>
-                          <span style={{ fontSize: 8, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'right', alignSelf: 'center' }}>
-                            {e.volume != null ? (e.volume >= 1000 ? `${Math.round(e.volume/1000)}k` : e.volume) : '—'}
-                          </span>
+                          <span style={{ fontSize: 8, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'right', alignSelf: 'center' }}>{e.volume != null ? (e.volume >= 1000 ? `${Math.round(e.volume/1000)}k` : e.volume) : '—'}</span>
                           <span style={{ fontSize: 9, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'right', alignSelf: 'center' }}>{td.first ?? '—'}</span>
-                          <span style={{ fontSize: 9, color: kwColor, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', alignSelf: 'center' }}>{td.last ?? '—'}</span>
-                          <span style={{ fontSize: 9, color: deltaColor, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right', alignSelf: 'center' }}>
-                            {td.delta > 0 ? `+${td.delta}` : td.delta === 0 ? '=' : td.delta}
-                          </span>
+                          <span style={{ fontSize: 9, color: kc, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', alignSelf: 'center' }}>{td.last ?? '—'}</span>
+                          <span style={{ fontSize: 9, color: dc, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right', alignSelf: 'center' }}>{td.delta > 0 ? `+${td.delta}` : td.delta === 0 ? '=' : td.delta}</span>
                         </div>
                       )
                     })}
