@@ -35,7 +35,7 @@ function computeTrends(kws: {id:string;keyword:string;color:string}[], s: any[])
     let f:number|null=null,l:number|null=null
     for (let i=0;i<s.length;i++) if(s[i][kw.id]!=null){f=s[i][kw.id];break}
     for (let i=s.length-1;i>=0;i--) if(s[i][kw.id]!=null){l=s[i][kw.id];break}
-    if(f==null||l==null){m[kw.id]={color:TREND_YELLOW,first:f,last:l,delta:0,positionLabel:'–',trend:'noData'}}
+    if(f==null||l==null){m[kw.id]={color:TREND_WHITE,first:f,last:l,delta:0,positionLabel:'–',trend:'noData'}}
     else if(f>=100&&l>=100){m[kw.id]={color:TREND_DARK,first:f,last:l,delta:0,positionLabel:`${f}→${l}`,trend:'stale100'}}
     else{const d=f-l;const t=d>0?'gain':d<0?'loss':'neutral';m[kw.id]={color:t==='gain'?TREND_GREEN:t==='loss'?TREND_RED:TREND_WHITE,first:f,last:l,delta:d,positionLabel:`${f}→${l}`,trend:t}}
   }
@@ -978,7 +978,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
 
       if (posAtAction == null || posAtEnd == null) {
         map[kwId] = {
-          color: TREND_YELLOW,
+          color: TREND_WHITE,
           first: posAtAction,
           last: posAtEnd,
           delta: 0,
@@ -1682,7 +1682,51 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
           </div>
 
           {/* Detail locked items */}
-          {(lockedItem || selectedAction) && lockedDetail && (
+          {/* ── Action sélectionnée : liste des URLs avec stats ── */}
+          {selectedAction && actionHighlightedIds && actionTrendMap && (() => {
+            // Grouper les kw par URL
+            const urlStatsMap = new Map<string, { gain: number; loss: number; neutral: number; lost: number; noData: number }>()
+            for (const kwId of actionHighlightedIds) {
+              const urlId = kwUrlMap[kwId]; if (!urlId) continue
+              const td = actionTrendMap[kwId]
+              if (!urlStatsMap.has(urlId)) urlStatsMap.set(urlId, { gain: 0, loss: 0, neutral: 0, lost: 0, noData: 0 })
+              const s = urlStatsMap.get(urlId)!
+              if (!td || td.trend === 'noData') s.noData++
+              else if (td.last != null && td.last >= 100) s.lost++
+              else if (td.trend === 'gain') s.gain++
+              else if (td.trend === 'loss') s.loss++
+              else s.neutral++
+            }
+            const urlEntries = [...urlStatsMap.entries()]
+              .map(([urlId, stats]) => ({ urlId, url: urlMeta.find(u => u.id === urlId)?.label ?? urlId, ...stats }))
+              .sort((a, b) => (b.gain - b.loss) - (a.gain - a.loss))
+            if (!urlEntries.length) return null
+            return (
+              <div className="tracker-scroll border-t pt-1 flex flex-col gap-px max-h-36 overflow-y-auto flex-shrink-0" style={{borderColor:'#1a3535'}}>
+                <div className="flex items-center justify-between px-1 mb-1">
+                  <span className="text-[8px] font-semibold uppercase" style={{color:C_PRIMARY}}>{urlEntries.length} URL{urlEntries.length > 1 ? 's' : ''} concernée{urlEntries.length > 1 ? 's' : ''}</span>
+                  <button onClick={() => { setSelectedAction(null) }} className="text-[8px]" style={{color:'#4a7a7a'}}>✕</button>
+                </div>
+                {urlEntries.map(e => (
+                  <div key={e.urlId} className="flex flex-col px-1 py-1 rounded"
+                    onMouseEnter={ev => (ev.currentTarget.style.background='#0d1f1f')}
+                    onMouseLeave={ev => (ev.currentTarget.style.background='transparent')}>
+                    <span className="text-[9px] truncate mb-0.5" style={{color:'#a3c4c4'}}>{e.url.replace(/^https?:\/\/[^/]+/, '')}</span>
+                    <div className="flex gap-2">
+                      {e.gain    > 0 && <span className="text-[8px] font-mono" style={{color:'#317979'}}>↑{e.gain}</span>}
+                      {e.loss    > 0 && <span className="text-[8px] font-mono" style={{color:'#ef4444'}}>↓{e.loss}</span>}
+                      {e.neutral > 0 && <span className="text-[8px] font-mono" style={{color:'#4a7a7a'}}>={e.neutral}</span>}
+                      {e.lost    > 0 && <span className="text-[8px] font-mono" style={{color:'#f87171'}}>✕{e.lost}</span>}
+                      {e.noData  > 0 && <span className="text-[8px] font-mono" style={{color:'#2a5050'}}>—{e.noData}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+
+          {/* ── Locked item : liste des mots-clés ── */}
+          {lockedItem && lockedDetail && (
             <div className="tracker-scroll border-t pt-1 flex flex-col gap-px max-h-28 overflow-y-auto flex-shrink-0" style={{borderColor:'#1a3535'}}>
               <div className="flex items-center justify-between px-1">
                 <span className="text-[8px] font-semibold uppercase" style={{color:C_PRIMARY}}>{lockedDetail.type === 'keywords' ? `${lockedDetail.items.length} mc` : 'URL'}</span>
@@ -1693,7 +1737,7 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                     {hasVolumes && <button onClick={() => setDetailSortMode('volume')} className="text-[7px] px-1 rounded" style={detailSortMode==='volume'?{background:'#1a3535',color:C_WHITE}:{color:'#4a7a7a'}}>Vol</button>}
                   </div>
                 )}
-                <button onClick={() => { setLockedItem(null); setHovered(null); setSelectedAction(null) }} className="text-[8px] ml-1" style={{color:'#4a7a7a'}}>✕</button>
+                <button onClick={() => { setLockedItem(null); setHovered(null) }} className="text-[8px] ml-1" style={{color:'#4a7a7a'}}>✕</button>
               </div>
               {(() => {
                 const sorted = [...lockedDetail.items]
