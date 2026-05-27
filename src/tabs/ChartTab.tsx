@@ -1708,12 +1708,6 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
                 urlId,
                 url: urlId === '__none__' ? '(sans URL)' : (urlMeta.find(u => u.id === urlId)?.label ?? urlId),
                 avgDelta: stats.deltaCount > 0 ? Math.round(stats.totalDelta / stats.deltaCount * 10) / 10 : 0,
-                ...stats,
-              }))
-              .map(([urlId, stats]) => ({
-                urlId,
-                url: urlId === '__none__' ? '(sans URL)' : (urlMeta.find(u => u.id === urlId)?.label ?? urlId),
-                avgDelta: stats.deltaCount > 0 ? Math.round(stats.totalDelta / stats.deltaCount * 10) / 10 : 0,
                 total: stats.kwIds.length,
                 ...stats,
               }))
