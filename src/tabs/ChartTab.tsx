@@ -1682,50 +1682,173 @@ export function ChartTab({ onNavigateToActions }: { onNavigateToActions?: (urlId
           </div>
 
           {/* Detail locked items */}
-          {/* ── Action sélectionnée : liste des URLs avec stats ── */}
+          {/* ── Action sélectionnée : 2 colonnes URLs + mots-clés ── */}
           {selectedAction && actionHighlightedIds && actionTrendMap && (() => {
-            // Grouper les kw par URL
-            const urlStatsMap = new Map<string, { gain: number; loss: number; neutral: number; lost: number; noData: number }>()
+            // Grouper les kw par URL avec stats
+            const urlStatsMap = new Map<string, { gain: number; loss: number; neutral: number; lost: number; noData: number; totalDelta: number; deltaCount: number; kwIds: string[] }>()
             for (const kwId of actionHighlightedIds) {
-              const urlId = kwUrlMap[kwId]; if (!urlId) continue
+              const urlId = kwUrlMap[kwId] ?? '__none__'
               const td = actionTrendMap[kwId]
-              if (!urlStatsMap.has(urlId)) urlStatsMap.set(urlId, { gain: 0, loss: 0, neutral: 0, lost: 0, noData: 0 })
+              if (!urlStatsMap.has(urlId)) urlStatsMap.set(urlId, { gain: 0, loss: 0, neutral: 0, lost: 0, noData: 0, totalDelta: 0, deltaCount: 0, kwIds: [] })
               const s = urlStatsMap.get(urlId)!
+              s.kwIds.push(kwId)
               if (!td || td.trend === 'noData') s.noData++
-              else if (td.last != null && td.last >= 100) s.lost++
-              else if (td.trend === 'gain') s.gain++
-              else if (td.trend === 'loss') s.loss++
-              else s.neutral++
+              else if (td.last != null && td.last >= 100) { s.lost++; }
+              else if (td.trend === 'gain') { s.gain++; s.totalDelta += td.delta; s.deltaCount++ }
+              else if (td.trend === 'loss') { s.loss++; s.totalDelta += td.delta; s.deltaCount++ }
+              else { s.neutral++; }
             }
             const urlEntries = [...urlStatsMap.entries()]
-              .map(([urlId, stats]) => ({ urlId, url: urlMeta.find(u => u.id === urlId)?.label ?? urlId, ...stats }))
-              .sort((a, b) => (b.gain - b.loss) - (a.gain - a.loss))
-            if (!urlEntries.length) return null
+              .map(([urlId, stats]) => ({
+                urlId,
+                url: urlId === '__none__' ? '(sans URL)' : (urlMeta.find(u => u.id === urlId)?.label ?? urlId),
+                avgDelta: stats.deltaCount > 0 ? Math.round(stats.totalDelta / stats.deltaCount * 10) / 10 : 0,
+                ...stats,
+              }))
+              .sort((a, b) => b.gain - a.gain)
+
+            // Liste des kw avec détail : volume / pos début / pos fin / delta
+            const kwEntries = [...actionHighlightedIds]
+              .map(kwId => {
+                const kw = keywords.find(k => k.id === kwId)
+                const td = actionTrendMap[kwId]
+                return { kwId, label: kw?.keyword ?? kwId, volume: volumeMap[kwId] ?? null, td }
+              })
+              .filter(e => e.td && e.td.trend !== 'noData' && (e.td.last == null || e.td.last < 100))
+              .sort((a, b) => (b.td?.delta ?? 0) - (a.td?.delta ?? 0))
+
+            const [hoveredUrlId, setHoveredUrlId] = React.useState<string | null>(null)
+            const filteredKws = hoveredUrlId
+              ? kwEntries.filter(e => (kwUrlMap[e.kwId] ?? '__none__') === hoveredUrlId)
+              : kwEntries
+
             return (
-              <div className="tracker-scroll border-t pt-1 flex flex-col gap-px max-h-36 overflow-y-auto flex-shrink-0" style={{borderColor:'#1a3535'}}>
-                <div className="flex items-center justify-between px-1 mb-1">
-                  <span className="text-[8px] font-semibold uppercase" style={{color:C_PRIMARY}}>{urlEntries.length} URL{urlEntries.length > 1 ? 's' : ''} concernée{urlEntries.length > 1 ? 's' : ''}</span>
-                  <button onClick={() => { setSelectedAction(null) }} className="text-[8px]" style={{color:'#4a7a7a'}}>✕</button>
+              <div className="border-t flex-shrink-0" style={{ borderColor:'#1a3535', borderTop: `1px solid #1a3535`, marginTop: 4 }}>
+                <div className="flex items-center justify-between px-1 py-1">
+                  <span style={{ fontSize: 9, fontWeight: 700, color: C_PRIMARY, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                    {selectedAction.name}
+                  </span>
+                  <button onClick={() => setSelectedAction(null)} style={{ fontSize: 11, color: '#4a7a7a', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
                 </div>
-                {urlEntries.map(e => (
-                  <div key={e.urlId} className="flex flex-col px-1 py-1 rounded"
-                    onMouseEnter={ev => (ev.currentTarget.style.background='#0d1f1f')}
-                    onMouseLeave={ev => (ev.currentTarget.style.background='transparent')}>
-                    <span className="text-[9px] truncate mb-0.5" style={{color:'#a3c4c4'}}>{e.url.replace(/^https?:\/\/[^/]+/, '')}</span>
-                    <div className="flex gap-2">
-                      {e.gain    > 0 && <span className="text-[8px] font-mono" style={{color:'#317979'}}>↑{e.gain}</span>}
-                      {e.loss    > 0 && <span className="text-[8px] font-mono" style={{color:'#ef4444'}}>↓{e.loss}</span>}
-                      {e.neutral > 0 && <span className="text-[8px] font-mono" style={{color:'#4a7a7a'}}>={e.neutral}</span>}
-                      {e.lost    > 0 && <span className="text-[8px] font-mono" style={{color:'#f87171'}}>✕{e.lost}</span>}
-                      {e.noData  > 0 && <span className="text-[8px] font-mono" style={{color:'#2a5050'}}>—{e.noData}</span>}
-                    </div>
+                <div style={{ display: 'flex', gap: 6, height: 160, overflow: 'hidden' }}>
+
+                  {/* Colonne 1 — URLs */}
+                  <div className="tracker-scroll" style={{ flex: '0 0 44%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2, padding: '0 4px' }}>URLs</div>
+                    {urlEntries.map(e => {
+                      const isHov = hoveredUrlId === e.urlId
+                      const deltaColor = e.avgDelta > 0 ? '#317979' : e.avgDelta < 0 ? '#ef4444' : '#4a7a7a'
+                      return (
+                        <div key={e.urlId}
+                          onMouseEnter={() => setHoveredUrlId(e.urlId)}
+                          onMouseLeave={() => setHoveredUrlId(null)}
+                          style={{
+                            padding: '5px 6px', borderRadius: 7, cursor: 'pointer', transition: 'background 0.1s',
+                            background: isHov ? '#0d1f1f' : 'transparent',
+                            border: `1px solid ${isHov ? '#1a3535' : 'transparent'}`,
+                          }}>
+                          <div style={{ fontSize: 9, color: isHov ? '#a3f1eb' : '#a3c4c4', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {e.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            {e.gain    > 0 && <span style={{ fontSize: 9, fontWeight: 700, color: '#317979', fontFamily: 'monospace' }}>↑{e.gain}</span>}
+                            {e.loss    > 0 && <span style={{ fontSize: 9, fontWeight: 700, color: '#ef4444', fontFamily: 'monospace' }}>↓{e.loss}</span>}
+                            {e.neutral > 0 && <span style={{ fontSize: 9, color: '#4a7a7a', fontFamily: 'monospace' }}>={e.neutral}</span>}
+                            {e.lost    > 0 && <span style={{ fontSize: 9, color: '#f87171', fontFamily: 'monospace' }}>✕{e.lost}</span>}
+                            {e.noData  > 0 && <span style={{ fontSize: 9, color: '#2a5050', fontFamily: 'monospace' }}>—{e.noData}</span>}
+                            {e.deltaCount > 0 && (
+                              <span style={{ fontSize: 8, fontFamily: 'monospace', marginLeft: 'auto', color: deltaColor, fontWeight: 600 }}>
+                                {e.avgDelta > 0 ? '+' : ''}{e.avgDelta}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
+
+                  {/* Séparateur */}
+                  <div style={{ width: 1, background: '#1a3535', flexShrink: 0, margin: '16px 0 4px' }} />
+
+                  {/* Colonne 2 — Mots-clés */}
+                  <div className="tracker-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2, padding: '0 2px' }}>
+                      Mots-clés {hoveredUrlId ? <span style={{ color: '#317979' }}>· filtrés</span> : null}
+                    </div>
+                    {/* Header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 36px 32px 32px 28px', gap: 2, padding: '2px 4px', marginBottom: 2 }}>
+                      {['Mot-clé', 'Vol.', 'Déb.', 'Fin', 'Δ'].map(h => (
+                        <span key={h} style={{ fontSize: 7, fontWeight: 700, color: '#2a5050', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: h !== 'Mot-clé' ? 'right' : 'left' }}>{h}</span>
+                      ))}
+                    </div>
+                    {filteredKws.length === 0 && (
+                      <div style={{ fontSize: 10, color: '#2a5050', padding: '8px 4px', fontStyle: 'italic' }}>Aucun mot-clé avec données</div>
+                    )}
+                    {filteredKws.map(e => {
+                      const td = e.td!
+                      const deltaColor = td.delta > 0 ? '#317979' : td.delta < 0 ? '#ef4444' : '#4a7a7a'
+                      const kwColor = td.trend === 'gain' ? '#317979' : td.trend === 'loss' ? '#ef4444' : '#f6f6f6'
+                      return (
+                        <div key={e.kwId}
+                          style={{ display: 'grid', gridTemplateColumns: '1fr 36px 32px 32px 28px', gap: 2, padding: '3px 4px', borderRadius: 5, cursor: 'pointer' }}
+                          onMouseEnter={ev => { ev.currentTarget.style.background = '#0d1f1f'; setDetailHovered(e.kwId) }}
+                          onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent'; setDetailHovered(null) }}>
+                          <span style={{ fontSize: 9, color: '#a3c4c4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: kwColor, flexShrink: 0, display: 'inline-block' }} />
+                            {e.label}
+                          </span>
+                          <span style={{ fontSize: 8, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'right', alignSelf: 'center' }}>
+                            {e.volume != null ? (e.volume >= 1000 ? `${Math.round(e.volume/1000)}k` : e.volume) : '—'}
+                          </span>
+                          <span style={{ fontSize: 9, color: '#4a7a7a', fontFamily: 'monospace', textAlign: 'right', alignSelf: 'center' }}>{td.first ?? '—'}</span>
+                          <span style={{ fontSize: 9, color: kwColor, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', alignSelf: 'center' }}>{td.last ?? '—'}</span>
+                          <span style={{ fontSize: 9, color: deltaColor, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right', alignSelf: 'center' }}>
+                            {td.delta > 0 ? `+${td.delta}` : td.delta === 0 ? '=' : td.delta}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             )
           })()}
 
           {/* ── Locked item : liste des mots-clés ── */}
+          {!selectedAction && lockedItem && lockedDetail && (
+            <div className="tracker-scroll border-t pt-1 flex flex-col gap-px max-h-28 overflow-y-auto flex-shrink-0" style={{borderColor:'#1a3535'}}>
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[8px] font-semibold uppercase" style={{color:C_PRIMARY}}>{lockedDetail.type === 'keywords' ? `${lockedDetail.items.length} mc` : 'URL'}</span>
+                {lockedDetail.type === 'keywords' && lockedDetail.items.length > 1 && (
+                  <div className="flex gap-px">
+                    <button onClick={() => { setDetailSortMode('alpha'); setDetailSortAsc(false) }} className="text-[7px] px-1 rounded" style={detailSortMode==='alpha'?{background:'#1a3535',color:C_WHITE}:{color:'#4a7a7a'}}>AZ</button>
+                    <button onClick={() => { if (detailSortMode === 'gainloss') setDetailSortAsc(p => !p); else setDetailSortMode('gainloss') }} className="text-[7px] px-1 rounded" style={detailSortMode==='gainloss'?{background:'#1a3535',color:C_WHITE}:{color:'#4a7a7a'}}>{detailSortAsc ? '↓' : '↑'}</button>
+                    {hasVolumes && <button onClick={() => setDetailSortMode('volume')} className="text-[7px] px-1 rounded" style={detailSortMode==='volume'?{background:'#1a3535',color:C_WHITE}:{color:'#4a7a7a'}}>Vol</button>}
+                  </div>
+                )}
+                <button onClick={() => { setLockedItem(null); setHovered(null) }} className="text-[8px] ml-1" style={{color:'#4a7a7a'}}>✕</button>
+              </div>
+              {(() => {
+                const sorted = [...lockedDetail.items]
+                if (detailSortMode === 'gainloss') sorted.sort((a, b) => detailSortAsc ? ((a as any).delta ?? 0) - ((b as any).delta ?? 0) : ((b as any).delta ?? 0) - ((a as any).delta ?? 0))
+                else if (detailSortMode === 'volume') sorted.sort((a, b) => (volumeMap[b.id] ?? 0) - (volumeMap[a.id] ?? 0))
+                else sorted.sort((a, b) => a.label.localeCompare(b.label, 'fr'))
+                return sorted.map(d => (
+                  <div key={d.id} className="flex items-center gap-1 px-1 py-px rounded"
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#0d1f1f'; setDetailHovered(d.id) }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; setDetailHovered(null) }}>
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                    <span className="text-[10px] truncate" style={{color:'#a3c4c4'}}>{d.label}</span>
+                    <span className="ml-auto flex items-center gap-1 flex-shrink-0">
+                      {(d as any).positionLabel && <span className="text-[8px] font-mono" style={{color:'#4a7a7a'}}>({(d as any).positionLabel})</span>}
+                      {volumeMap[d.id] != null && <span className="text-[7px] font-mono" style={{color:C_LIGHT, opacity:0.6}}>{volumeMap[d.id]}</span>}
+                    </span>
+                  </div>
+                ))
+              })()}
+            </div>
+          )}
           {lockedItem && lockedDetail && (
             <div className="tracker-scroll border-t pt-1 flex flex-col gap-px max-h-28 overflow-y-auto flex-shrink-0" style={{borderColor:'#1a3535'}}>
               <div className="flex items-center justify-between px-1">
